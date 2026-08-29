@@ -1,0 +1,6 @@
+{
+  "name": "example",
+  "private": true,
+  "scripts": { "dev": "node server.js" },
+  "engines": { "node": ">=20" }
+}

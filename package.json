@@ -1,0 +1,14 @@
+{
+  "name": "repoignite",
+  "version": "1.0.0",
+  "description": "Figure out how to run an unfamiliar repository before touching its code.",
+  "type": "module",
+  "bin": { "repoignite": "./src/cli.js" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/cli.js && node --check src/analyze.js && node --check src/target.js && node --check src/run.js"
+  },
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "files": ["src", "README.md", "LICENSE"]
+}
