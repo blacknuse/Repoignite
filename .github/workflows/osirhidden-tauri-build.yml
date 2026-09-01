@@ -1,9 +1,6 @@
 name: osirhidden Tauri Windows Build
 
 on:
-  push:
-    branches:
-      - osirhidden-tauri-build
   workflow_dispatch:
 
 permissions:
@@ -12,7 +9,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +60,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: osirhidden-tauri-v2.1.0-premium-black-tsx-windows-x64
+          name: osirhidden-tauri-v2.2.0-obsidian-tsx-windows-x64
           path: src-tauri/target/release/osirhidden.exe
           if-no-files-found: error
           retention-days: 7
