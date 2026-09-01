@@ -1,0 +1,54 @@
+name: osirhidden Tauri Windows Build
+
+on:
+  push:
+    branches:
+      - osirhidden-tauri-build
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: npm install
+
+      - name: Verify sealed runtime boundary
+        shell: pwsh
+        run: python scripts/verify_boundary.py
+
+      - name: Build frontend
+        shell: pwsh
+        run: npm run build
+
+      - name: Build Tauri Windows executable
+        shell: pwsh
+        run: npm run tauri:build -- --no-bundle
+
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/osirhidden.exe'
+          if (!(Test-Path $exe)) { throw "Missing $exe" }
+          Get-Item $exe | Format-List FullName,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osirhidden-tauri-v2.0.0-windows-x64
+          path: src-tauri/target/release/osirhidden.exe
+          if-no-files-found: error
+          retention-days: 7

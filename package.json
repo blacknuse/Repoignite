@@ -1,14 +1,23 @@
 {
-  "name": "repoignite",
-  "version": "1.0.0",
-  "description": "Figure out how to run an unfamiliar repository before touching its code.",
+  "name": "osirhidden-tauri",
+  "private": true,
+  "version": "2.0.0",
   "type": "module",
-  "bin": { "repoignite": "./src/cli.js" },
   "scripts": {
-    "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/analyze.js && node --check src/target.js && node --check src/run.js"
+    "dev": "vite --port 1420",
+    "build": "vite build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
-  "license": "MIT",
-  "engines": { "node": ">=20" },
-  "files": ["src", "README.md", "LICENSE"]
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0"
+  }
 }

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "osirhidden",
+  "version": "2.0.0",
+  "identifier": "com.osirhidden.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "osirhidden",
+        "width": 880,
+        "height": 520,
+        "minWidth": 880,
+        "minHeight": 520,
+        "center": true,
+        "resizable": false,
+        "decorations": false,
+        "shadow": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost https://scriptblox.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "osirhidden",
+    "shortDescription": "Premium native desktop workspace",
+    "longDescription": "A lightweight Tauri + React desktop workspace.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}

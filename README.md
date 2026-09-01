@@ -1,102 +1,16 @@
-# RepoIgnite
+# osirhidden 2.0 — Tauri + React Premium Rebuild
 
-> **Git clone without the setup archaeology.**
+This version replaces the Electron shell with a standard **Tauri 2 + React 18 + Vite** desktop architecture.
 
-RepoIgnite inspects an unfamiliar repository and answers the first boring
-question: **how is this thing supposed to run?**
+## What changed
+- Native Tauri shell using the Windows WebView2 already present on most Windows 10/11 systems.
+- No bundled Chromium / no ~138 MB Electron runtime download.
+- One-window premium splash -> native resize -> main workspace transition.
+- New design system: measured spacing, restrained motion, thin dividers, minimal rounding, no card-heavy “AI UI”.
+- Dark and light themes share identical geometry.
+- Safe native commands for: settings, file open/save, client list/close, localhost 6969 health probe, filtered Roblox log read, ScriptBlox read-only search/raw import.
+- **No external script execution command is registered.**
+- **No DLL injection, remote-memory API, hook registration, or anti-cheat bypass is connected.**
 
-It does not execute anything by default.
-
-```text
-$ repoignite .
-
-RepoIgnite 1.0.0
-target      .
-confidence  HIGH
-stack       node
-install     npm install
-start       npm run dev
-services    postgres
-env example DATABASE_URL, PORT
-```
-
-## Why
-
-A surprising amount of repository evaluation starts with the same scavenger
-hunt: runtime version, package manager, install command, launch command,
-required environment variables, database, and whether Docker is actually
-expected.
-
-RepoIgnite turns those clues into a small, auditable launch plan.
-
-## Quick start
-
-Node.js 20+ is required. There are no runtime dependencies.
-
-```bash
-npm link
-repoignite .
-```
-
-Public GitHub repositories can be inspected directly:
-
-```bash
-repoignite https://github.com/owner/repo
-```
-
-Remote repositories are shallow-cloned into a temporary directory and removed
-after inspection.
-
-## Commands
-
-```bash
-repoignite . --json
-repoignite . --doctor
-repoignite . --write
-repoignite . --install
-repoignite . --run
-```
-
-`--install` and `--run` execute commands. A remote repository additionally
-requires `--trust`:
-
-```bash
-repoignite https://github.com/owner/repo --run --trust
-```
-
-That friction is intentional. RepoIgnite is a setup assistant, not a sandbox.
-
-## Detection
-
-The first release understands common signals for:
-
-- Node.js: `package.json`, lockfiles, `packageManager`, common scripts
-- Python: `requirements.txt`, `pyproject.toml`, `app.py`, `main.py`, `manage.py`
-- Go: `go.mod`, root or `cmd/*` entrypoints
-- Rust: `Cargo.toml`
-- Docker Compose
-- `.env.example`, `.env.sample`, `.env.template`
-- common environment-variable reads in JavaScript/TypeScript/Python
-
-It prefers evidence over guesswork. If a safe start command cannot be inferred,
-it says so.
-
-## Security boundary
-
-Inspection is static. RepoIgnite does not load project modules, run package
-scripts, or install dependencies unless you explicitly ask it to.
-
-`--trust` is not a security guarantee. It only prevents accidental execution of
-a freshly cloned repository.
-
-## Development
-
-```bash
-npm run check
-npm test
-node src/cli.js ./examples/node-app
-```
-
-## License
-
-MIT
+## Build on Windows
+Use the GitHub Actions workflow on the `osirhidden-tauri-build` branch or run `npm install` and `npm run tauri:build -- --no-bundle` on Windows with Rust and the Microsoft C++ toolchain installed.
