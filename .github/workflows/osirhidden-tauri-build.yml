@@ -30,22 +30,9 @@ jobs:
         shell: pwsh
         run: python scripts/verify_boundary.py
 
-      - name: Patch renderer syntax and verify
+      - name: Verify TSX renderer
         shell: pwsh
-        run: |
-          $p = 'src/App.jsx'
-          $s = Get-Content $p -Raw
-          $patches = @(
-            @('this.renderPanel())); }', 'this.renderPanel()))); }'),
-            @('control)))); }', 'control))))); }')
-          )
-          foreach ($patch in $patches) {
-            if (-not $s.Contains($patch[0])) { throw "Expected renderer patch target not found: $($patch[0])" }
-            $s = $s.Replace($patch[0], $patch[1])
-          }
-          Set-Content -Path $p -Value $s -NoNewline -Encoding utf8
-          Copy-Item $p "$env:TEMP\App.mjs"
-          node --check "$env:TEMP\App.mjs"
+        run: npm run typecheck
 
       - name: Create Windows application icon
         shell: pwsh
@@ -73,7 +60,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: osirhidden-tauri-v2.0.0-windows-x64
+          name: osirhidden-tauri-tsx-windows-x64
           path: src-tauri/target/release/osirhidden.exe
           if-no-files-found: error
           retention-days: 7
