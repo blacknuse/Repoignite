@@ -30,9 +30,12 @@ jobs:
         shell: pwsh
         run: python scripts/verify_boundary.py
 
-      - name: Verify TSX renderer
+      - name: Verify strict TSX renderer
         shell: pwsh
-        run: npm run typecheck
+        run: |
+          if (Test-Path 'src/App.jsx') { throw 'Legacy JSX renderer must not exist' }
+          if (Test-Path 'src/main.jsx') { throw 'Legacy JSX entrypoint must not exist' }
+          npm run typecheck
 
       - name: Create Windows application icon
         shell: pwsh
@@ -60,7 +63,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: osirhidden-tauri-tsx-windows-x64
+          name: osirhidden-tauri-v2.1.0-premium-black-tsx-windows-x64
           path: src-tauri/target/release/osirhidden.exe
           if-no-files-found: error
           retention-days: 7
