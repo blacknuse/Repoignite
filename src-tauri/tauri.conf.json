@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "osirhidden",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "identifier": "com.osirhidden.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -16,9 +16,9 @@
         "label": "main",
         "title": "osirhidden",
         "width": 720,
-        "height": 430,
+        "height": 420,
         "minWidth": 720,
-        "minHeight": 430,
+        "minHeight": 420,
         "center": true,
         "resizable": false,
         "decorations": false,
@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost https://scriptblox.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {
@@ -35,7 +35,7 @@
     "targets": ["nsis"],
     "publisher": "osirhidden",
     "shortDescription": "Premium native desktop workspace",
-    "longDescription": "A compact black Tauri + React + TypeScript desktop workspace.",
+    "longDescription": "A lightweight Tauri + React + TSX desktop workspace.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
