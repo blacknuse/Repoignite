@@ -47,6 +47,14 @@ jobs:
           Copy-Item $p "$env:TEMP\App.mjs"
           node --check "$env:TEMP\App.mjs"
 
+      - name: Create Windows application icon
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'src-tauri/icons' | Out-Null
+          $icon = 'AAABAAEAICAAAAAAIABsAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAADNJREFUeJztzkEBADAIxLBjaiZiYnE6ZPBJDTR1X/8sdjbnAAAAAAAAAAAAAAAAAAAASTKAAgJDhhVvQQAAAABJRU5ErkJggg=='
+          [IO.File]::WriteAllBytes('src-tauri/icons/icon.ico', [Convert]::FromBase64String($icon))
+          if (!(Test-Path 'src-tauri/icons/icon.ico')) { throw 'Failed to generate icon.ico' }
+
       - name: Build frontend
         shell: pwsh
         run: npm run build
