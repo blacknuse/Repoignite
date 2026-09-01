@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{fs, io::Read, net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream}, path::PathBuf, process::Command, time::{Duration, SystemTime}};
+use std::{fs, io::Read, net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream}, path::{Path, PathBuf}, process::Command, time::{Duration, SystemTime}};
 use tauri::{LogicalSize, Manager, Size, WebviewWindow};
 
 #[derive(Serialize)] struct AppInfo { version: String, platform: String, arch: String }
@@ -9,6 +9,7 @@ use tauri::{LogicalSize, Manager, Size, WebviewWindow};
 #[derive(Serialize)] struct OpenedScript { name: String, path: String, content: String }
 #[derive(Serialize)] struct SavedScript { ok: bool, name: String, path: String }
 #[derive(Serialize)] struct OutputEntry { level: String, message: String, timestamp: Option<String> }
+#[derive(Serialize)] struct FolderScript { name: String, path: String }
 #[derive(Deserialize)] struct ScriptBloxEnvelope { result: Option<ScriptBloxResult>, message: Option<String> }
 #[derive(Deserialize)] struct ScriptBloxResult { scripts: Option<Vec<Value>>, #[serde(rename="totalPages")] total_pages: Option<u32> }
 
@@ -19,6 +20,22 @@ fn app_data_dir() -> PathBuf {
     base.join("osirhidden")
 }
 fn settings_path() -> PathBuf { app_data_dir().join("settings-v2.json") }
+fn allowed_script_extension(path: &Path) -> bool {
+    path.extension().and_then(|x| x.to_str()).map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "lua" | "luau" | "txt")).unwrap_or(false)
+}
+fn read_script_file(path: &Path) -> Result<OpenedScript, String> {
+    if !path.is_file() || !allowed_script_extension(path) { return Err("UNSUPPORTED_SCRIPT_FILE".into()); }
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > 2 * 1024 * 1024 { return Err("SCRIPT_TOO_LARGE".into()); }
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut content = String::new();
+    file.take(2 * 1024 * 1024).read_to_string(&mut content).map_err(|e| e.to_string())?;
+    Ok(OpenedScript {
+        name: path.file_name().and_then(|x| x.to_str()).unwrap_or("Opened.lua").to_string(),
+        path: path.to_string_lossy().to_string(),
+        content
+    })
+}
 
 #[tauri::command]
 fn app_info() -> AppInfo { AppInfo { version: env!("CARGO_PKG_VERSION").into(), platform: std::env::consts::OS.into(), arch: std::env::consts::ARCH.into() } }
@@ -26,8 +43,8 @@ fn app_info() -> AppInfo { AppInfo { version: env!("CARGO_PKG_VERSION").into(), 
 #[tauri::command]
 fn promote_main_window(window: WebviewWindow) -> Result<(), String> {
     window.set_resizable(true).map_err(|e| e.to_string())?;
-    window.set_min_size(Some(Size::Logical(LogicalSize { width: 980.0, height: 650.0 }))).map_err(|e| e.to_string())?;
-    window.set_size(Size::Logical(LogicalSize { width: 1280.0, height: 820.0 })).map_err(|e| e.to_string())?;
+    window.set_min_size(Some(Size::Logical(LogicalSize { width: 900.0, height: 600.0 }))).map_err(|e| e.to_string())?;
+    window.set_size(Size::Logical(LogicalSize { width: 1080.0, height: 680.0 })).map_err(|e| e.to_string())?;
     window.center().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -41,6 +58,18 @@ fn runtime_status(port: Option<u16>) -> RuntimeStatus {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let online = TcpStream::connect_timeout(&addr, Duration::from_millis(220)).is_ok();
     RuntimeStatus { online, port, mode: if online { "local" } else { "detached" } }
+}
+
+#[tauri::command]
+fn launch_roblox() -> Result<Value, String> {
+    if cfg!(not(target_os="windows")) { return Err("WINDOWS_ONLY".into()); }
+    let status = Command::new("cmd")
+        .args(["/C", "start", "", "roblox-player:"])
+        .creation_flags_no_window()
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() { return Err("ROBLOX_LAUNCH_FAILED".into()); }
+    Ok(json!({"ok": true}))
 }
 
 fn parse_tasklist_csv(text: &str) -> Vec<ClientInfo> {
@@ -89,8 +118,12 @@ fn save_settings(value: Value) -> Result<Value, String> {
 fn open_script() -> Result<Option<OpenedScript>, String> {
     let picked = rfd::FileDialog::new().add_filter("Luau / Lua", &["lua","luau","txt"]).pick_file();
     let Some(path) = picked else { return Ok(None); };
-    let mut file=fs::File::open(&path).map_err(|e|e.to_string())?; let mut content=String::new(); file.take(2*1024*1024).read_to_string(&mut content).map_err(|e|e.to_string())?;
-    Ok(Some(OpenedScript { name:path.file_name().and_then(|x|x.to_str()).unwrap_or("Opened.lua").to_string(), path:path.to_string_lossy().to_string(), content }))
+    Ok(Some(read_script_file(&path)?))
+}
+#[tauri::command]
+fn read_script_path(path: String) -> Result<Option<OpenedScript>, String> {
+    let path = PathBuf::from(path);
+    Ok(Some(read_script_file(&path)?))
 }
 #[tauri::command]
 fn save_script(suggested_name: String, content: String) -> Result<Option<SavedScript>, String> {
@@ -100,6 +133,26 @@ fn save_script(suggested_name: String, content: String) -> Result<Option<SavedSc
     if content.len() > 2*1024*1024 { return Err("SCRIPT_TOO_LARGE".into()); }
     fs::write(&path, content).map_err(|e|e.to_string())?;
     Ok(Some(SavedScript { ok:true, name:path.file_name().and_then(|x|x.to_str()).unwrap_or("script.lua").to_string(), path:path.to_string_lossy().to_string() }))
+}
+#[tauri::command]
+fn choose_autoexec_folder() -> Option<String> {
+    rfd::FileDialog::new().pick_folder().map(|path| path.to_string_lossy().to_string())
+}
+#[tauri::command]
+fn list_folder_scripts(path: String) -> Result<Vec<FolderScript>, String> {
+    let root = PathBuf::from(path);
+    if !root.is_dir() { return Err("FOLDER_NOT_FOUND".into()); }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten().take(200) {
+        let path = entry.path();
+        if !path.is_file() || !allowed_script_extension(&path) { continue; }
+        out.push(FolderScript {
+            name: path.file_name().and_then(|x| x.to_str()).unwrap_or("script.lua").to_string(),
+            path: path.to_string_lossy().to_string()
+        });
+    }
+    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    Ok(out)
 }
 
 fn newest_log() -> Option<PathBuf> {
@@ -150,7 +203,12 @@ async fn scriptblox_raw(identifier:String)->Result<Value,String>{
 }
 
 fn main(){
-    tauri::Builder::default().invoke_handler(tauri::generate_handler![app_info,promote_main_window,window_minimize,window_toggle_maximize,window_close,runtime_status,list_clients,close_client,load_settings,save_settings,open_script,save_script,read_roblox_output,scriptblox_search,scriptblox_raw])
+    tauri::Builder::default().invoke_handler(tauri::generate_handler![
+        app_info,promote_main_window,window_minimize,window_toggle_maximize,window_close,
+        runtime_status,launch_roblox,list_clients,close_client,load_settings,save_settings,
+        open_script,read_script_path,save_script,choose_autoexec_folder,list_folder_scripts,
+        read_roblox_output,scriptblox_search,scriptblox_raw
+    ])
       .setup(|app|{ if let Some(win)=app.get_webview_window("main"){ let _=win.set_resizable(false); } Ok(()) })
       .run(tauri::generate_context!()).expect("error while running osirhidden");
 }
