@@ -1,6 +1,9 @@
 name: osirhidden Tauri Windows Build
 
 on:
+  push:
+    branches:
+      - osirhidden-tauri-build
   workflow_dispatch:
 
 permissions:
