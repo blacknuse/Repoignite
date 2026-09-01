@@ -4,528 +4,297 @@ import { invoke } from '@tauri-apps/api/core';
 type View = 'editor' | 'scripts' | 'clients' | 'settings';
 type Panel = 'problems' | 'output' | 'terminal';
 type Density = 'comfortable' | 'compact';
-type SettingsSection = 'appearance' | 'editor' | 'roblox' | 'workspace' | 'about';
+type Accent = 'white' | 'silver' | 'red' | 'violet' | 'emerald';
 type OutputLevel = 'output' | 'warning' | 'error' | 'info';
-type InjectPhase = 'idle' | 'injecting' | 'ready';
-
 type Tab = { id: number; name: string; content: string; dirty: boolean };
 type RuntimeStatus = { online: boolean; port: number; mode?: string };
 type ClientInfo = { name: string; pid: number; memory: string };
 type OutputEntry = { level: OutputLevel; message: string; timestamp?: string | null };
-type ScriptItem = { id?: string; slug?: string; title?: string; game?: string; verified?: boolean; views?: number; scriptType?: string; script?: string };
-type ScriptSearchResult = { scripts: ScriptItem[]; page: number; totalPages: number };
+type FolderScript = { name: string; path: string };
+type ScriptItem = { id?: string; slug?: string; title?: string; game?: string; verified?: boolean; key?: boolean; isUniversal?: boolean; isPatched?: boolean; views?: number; scriptType?: string; script?: string };
+type ScriptSearchResult = { scripts: ScriptItem[]; page: number; totalPages: number; source?: string };
 type AppInfo = { version: string; platform: string; arch: string };
 type OpenedScript = { name: string; path: string; content: string };
 type SavedScript = { ok: boolean; name: string; path: string };
-type FolderScript = { name: string; path: string };
-type SettingsPayload = {
-  motion?: boolean;
-  density?: Density;
-  accent?: string;
-  editorFontSize?: number;
-  autocomplete?: boolean;
-  outputAutoScroll?: boolean;
-  autoFolder?: string;
-};
-type Completion = { label: string; insert: string; detail: string; cursorOffset?: number; kind: 'function' | 'keyword' | 'snippet' | 'global' };
-type CompletionContext = { start: number; end: number; row: number; col: number; prefix: string };
+type SettingsPayload = { accent?: Accent; motion?: boolean; density?: Density; editorFontSize?: number; autocomplete?: boolean; timestamps?: boolean; maxOutput?: number; panelHeight?: number };
+type ReferenceStage = { name: string; detail: string; durationMs: number };
+type ReferencePlan = { ok: boolean; mode: string; stages: ReferenceStage[]; warnings?: string[]; digest?: string; lineCount?: number; tokenCount?: number; byteCount?: number; externalEffects: number; targetWiring: boolean };
+type Completion = { label: string; kind: string; detail: string };
 
 const PREVIEW = new URLSearchParams(location.search).get('preview');
-const STORAGE_KEY = 'osirhidden-v21-workspace';
-const DEFAULT_SCRIPT = '-- osirhidden workspace\n\nprint("Hello from osirhidden")';
-const ACCENTS = ['#7c8cff', '#9b7cff', '#53c8ff', '#5ed6a7', '#f0a86b', '#ef7188'];
+const STORAGE_KEY = 'osirhidden-v2.2-workspace';
+const DEFAULT_SCRIPT = '-- osirhidden / Luau workspace\n\nprint("Hello from osirhidden")';
+const ACCENTS: Record<Accent, string> = { white: '#f4f4f5', silver: '#b8bcc5', red: '#f05b64', violet: '#a98cff', emerald: '#6dd6a2' };
+
 const LUAU_COMPLETIONS: Completion[] = [
-  { label: 'print', insert: 'print()', detail: 'Write values to output', cursorOffset: -1, kind: 'function' },
-  { label: 'pairs', insert: 'pairs()', detail: 'Iterate key/value pairs', cursorOffset: -1, kind: 'function' },
-  { label: 'ipairs', insert: 'ipairs()', detail: 'Iterate array values', cursorOffset: -1, kind: 'function' },
-  { label: 'pcall', insert: 'pcall(function()\n\t\nend)', detail: 'Protected function call', cursorOffset: -5, kind: 'snippet' },
-  { label: 'xpcall', insert: 'xpcall(function()\n\t\nend, function(err)\n\treturn err\nend)', detail: 'Protected call with handler', kind: 'snippet' },
-  { label: 'warn', insert: 'warn()', detail: 'Write a warning', cursorOffset: -1, kind: 'function' },
-  { label: 'error', insert: 'error()', detail: 'Raise an error', cursorOffset: -1, kind: 'function' },
-  { label: 'tostring', insert: 'tostring()', detail: 'Convert value to string', cursorOffset: -1, kind: 'function' },
-  { label: 'tonumber', insert: 'tonumber()', detail: 'Convert value to number', cursorOffset: -1, kind: 'function' },
-  { label: 'type', insert: 'type()', detail: 'Lua type query', cursorOffset: -1, kind: 'function' },
-  { label: 'typeof', insert: 'typeof()', detail: 'Luau type query', cursorOffset: -1, kind: 'function' },
-  { label: 'require', insert: 'require()', detail: 'Load a module', cursorOffset: -1, kind: 'function' },
-  { label: 'task.wait', insert: 'task.wait()', detail: 'Yield for a duration', cursorOffset: -1, kind: 'global' },
-  { label: 'task.spawn', insert: 'task.spawn(function()\n\t\nend)', detail: 'Schedule a task', cursorOffset: -5, kind: 'snippet' },
-  { label: 'task.defer', insert: 'task.defer(function()\n\t\nend)', detail: 'Defer a task', cursorOffset: -5, kind: 'snippet' },
-  { label: 'table.insert', insert: 'table.insert()', detail: 'Insert into a table', cursorOffset: -1, kind: 'function' },
-  { label: 'table.remove', insert: 'table.remove()', detail: 'Remove from a table', cursorOffset: -1, kind: 'function' },
-  { label: 'game:GetService', insert: 'game:GetService("")', detail: 'Get a Roblox service', cursorOffset: -2, kind: 'global' },
-  { label: 'local', insert: 'local ', detail: 'Declare a local variable', kind: 'keyword' },
-  { label: 'function', insert: 'function name()\n\t\nend', detail: 'Function declaration', cursorOffset: -8, kind: 'snippet' },
-  { label: 'if', insert: 'if condition then\n\t\nend', detail: 'Conditional block', cursorOffset: -8, kind: 'snippet' },
-  { label: 'for', insert: 'for key, value in pairs(table) do\n\t\nend', detail: 'Generic for loop', cursorOffset: -8, kind: 'snippet' },
-  { label: 'while', insert: 'while condition do\n\t\nend', detail: 'While loop', cursorOffset: -8, kind: 'snippet' },
-  { label: 'return', insert: 'return ', detail: 'Return from function', kind: 'keyword' }
+  { label: 'print', kind: 'function', detail: 'print(...): void' },
+  { label: 'warn', kind: 'function', detail: 'warn(...): void' },
+  { label: 'pairs', kind: 'function', detail: 'pairs(t)' },
+  { label: 'ipairs', kind: 'function', detail: 'ipairs(t)' },
+  { label: 'pcall', kind: 'function', detail: 'pcall(f, ...)' },
+  { label: 'xpcall', kind: 'function', detail: 'xpcall(f, handler, ...)' },
+  { label: 'type', kind: 'function', detail: 'type(v): string' },
+  { label: 'typeof', kind: 'function', detail: 'typeof(v): string' },
+  { label: 'tostring', kind: 'function', detail: 'tostring(v): string' },
+  { label: 'tonumber', kind: 'function', detail: 'tonumber(v): number?' },
+  { label: 'assert', kind: 'function', detail: 'assert(v, message?)' },
+  { label: 'error', kind: 'function', detail: 'error(message, level?)' },
+  { label: 'select', kind: 'function', detail: 'select(index, ...)' },
+  { label: 'next', kind: 'function', detail: 'next(t, index?)' },
+  { label: 'require', kind: 'function', detail: 'require(module)' },
+  { label: 'local', kind: 'keyword', detail: 'local variable declaration' },
+  { label: 'function', kind: 'keyword', detail: 'function declaration' },
+  { label: 'return', kind: 'keyword', detail: 'return values' },
+  { label: 'if', kind: 'keyword', detail: 'conditional' },
+  { label: 'then', kind: 'keyword', detail: 'conditional branch' },
+  { label: 'elseif', kind: 'keyword', detail: 'conditional branch' },
+  { label: 'else', kind: 'keyword', detail: 'conditional branch' },
+  { label: 'end', kind: 'keyword', detail: 'close block' },
+  { label: 'for', kind: 'keyword', detail: 'loop' },
+  { label: 'while', kind: 'keyword', detail: 'loop' },
+  { label: 'repeat', kind: 'keyword', detail: 'repeat loop' },
+  { label: 'until', kind: 'keyword', detail: 'repeat loop terminator' },
+  { label: 'break', kind: 'keyword', detail: 'break loop' },
+  { label: 'continue', kind: 'keyword', detail: 'continue loop' },
+  { label: 'and', kind: 'keyword', detail: 'logical and' },
+  { label: 'or', kind: 'keyword', detail: 'logical or' },
+  { label: 'not', kind: 'keyword', detail: 'logical not' },
+  { label: 'true', kind: 'value', detail: 'boolean' },
+  { label: 'false', kind: 'value', detail: 'boolean' },
+  { label: 'nil', kind: 'value', detail: 'nil value' },
+  { label: 'game', kind: 'global', detail: 'DataModel' },
+  { label: 'workspace', kind: 'global', detail: 'Workspace' },
+  { label: 'script', kind: 'global', detail: 'current Script' },
+  { label: 'Enum', kind: 'global', detail: 'Roblox Enum table' },
+  { label: 'Instance', kind: 'global', detail: 'Instance.new(className)' },
+  { label: 'Vector2', kind: 'global', detail: 'Vector2.new(x, y)' },
+  { label: 'Vector3', kind: 'global', detail: 'Vector3.new(x, y, z)' },
+  { label: 'CFrame', kind: 'global', detail: 'CFrame.new(...)' },
+  { label: 'Color3', kind: 'global', detail: 'Color3.new(r, g, b)' },
+  { label: 'UDim2', kind: 'global', detail: 'UDim2.new(...)' },
+  { label: 'task', kind: 'global', detail: 'task scheduler library' },
+  { label: 'table', kind: 'library', detail: 'table library' },
+  { label: 'string', kind: 'library', detail: 'string library' },
+  { label: 'math', kind: 'library', detail: 'math library' },
+  { label: 'coroutine', kind: 'library', detail: 'coroutine library' },
+  { label: 'utf8', kind: 'library', detail: 'utf8 library' },
 ];
 
-async function safeInvoke<T>(command: string, args: Record<string, unknown> = {}, fallback: T): Promise<T> {
-  try { return await invoke<T>(command, args); }
-  catch (error) {
-    if (PREVIEW) return fallback;
-    throw error;
-  }
-}
-
 const iconPaths: Record<string, string[]> = {
-  code: ['M8 9 4 12l4 3','m16-6 4 3-4 3','m14 5-4 14'],
-  globe: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z','M3.6 9h16.8','M3.6 15h16.8','M12 3c2.3 2.45 3.5 5.45 3.5 9S14.3 18.55 12 21c-2.3-2.45-3.5-5.45-3.5-9S9.7 5.45 12 3Z'],
-  users: ['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2','M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M22 21v-2a4 4 0 0 0-3-3.87'],
-  settings: ['M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z','M19.4 15a7.6 7.6 0 0 0 .1-3l2-1.3-2-3.4-2.3.8a8 8 0 0 0-2.6-1.5L14 4h-4l-.5 2.6A8 8 0 0 0 7 8.1l-2.4-.8-2 3.4L4.6 12a7.6 7.6 0 0 0 .1 3l-2.1 1.3 2 3.4 2.4-.8a8 8 0 0 0 2.5 1.5L10 23h4l.5-2.6a8 8 0 0 0 2.6-1.5l2.3.8 2-3.4-2-1.3Z'],
-  play: ['m8 5 11 7-11 7V5Z'], plus:['M12 5v14','M5 12h14'], x:['m6 6 12 12','M18 6 6 18'], minus:['M5 12h14'], square:['M6 6h12v12H6z'],
-  folder:['M3 6.5h6l2 2h10v10.5H3V6.5Z'], file:['M6 2.5h8l4 4V21H6V2.5Z','M14 2.5v5h5'], search:['m21 21-4.2-4.2','M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
-  open:['M4 6h6l2 2h8v10H4V6Z','m12 4 4 4 4-4','M16 8V3'], save:['M4 4h14l2 2v14H4V4Z','M7 4v6h9V4','M8 20v-6h8v6'], copy:['M8 8h11v12H8V8Z','M5 16H4V4h11v1'],
-  chevron:['m9 18 6-6-6-6'], terminal:['m4 6 5 5-5 5','M11 18h9'], refresh:['M20 6v5h-5','M4 18v-5h5','M6.2 8.8A7 7 0 0 1 18.5 6.5L20 11','M4 13l1.5 4.5A7 7 0 0 0 17.8 15'],
+  editor:['M8 6h8','M8 12h8','M8 18h5','M4 6h.01','M4 12h.01','M4 18h.01'], search:['m21 21-4.3-4.3','M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
+  users:['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2','M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M22 21v-2a4 4 0 0 0-3-3.87'],
+  settings:['M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z','M19.4 15a7.6 7.6 0 0 0 .1-3l2-1.3-2-3.4-2.3.8a8 8 0 0 0-2.6-1.5L14 4h-4l-.5 2.6A8 8 0 0 0 7 8.1l-2.4-.8-2 3.4L4.6 12a7.6 7.6 0 0 0 .1 3l-2.1 1.3 2 3.4 2.4-.8a8 8 0 0 0 2.5 1.5L10 23h4l.5-2.6a8 8 0 0 0 2.6-1.5l2.3.8 2-3.4-2-1.3Z'],
+  play:['m8 5 11 7-11 7V5Z'], plus:['M12 5v14','M5 12h14'], x:['m6 6 12 12','M18 6 6 18'], minus:['M5 12h14'], square:['M6 6h12v12H6z'],
+  folder:['M3 6.5h6l2 2h10v10.5H3V6.5Z'], file:['M6 2.5h8l4 4V21H6V2.5Z','M14 2.5v5h5'], open:['M4 6h6l2 2h8v10H4V6Z','m12 4 4 4 4-4','M16 8V3'],
+  save:['M4 4h14l2 2v14H4V4Z','M7 4v6h9V4','M8 20v-6h8v6'], copy:['M8 8h11v12H8V8Z','M5 16H4V4h11v1'], chevron:['m9 18 6-6-6-6'],
+  terminal:['m4 6 5 5-5 5','M11 18h9'], refresh:['M20 6v5h-5','M4 18v-5h5','M6.2 8.8A7 7 0 0 1 18.5 6.5L20 11','M4 13l1.5 4.5A7 7 0 0 0 17.8 15'],
   bolt:['m13 2-9 12h7l-1 8 9-12h-7l1-8Z'], monitor:['M3 4h18v12H3V4Z','M8 21h8','M12 16v5'], check:['m5 12 4 4L19 6'],
-  rocket:['M4 15c-1 2-1 4-1 6 2 0 4 0 6-1','M14 4c3-2 6-1 7-1 0 1 1 4-1 7L13 15l-4-4 5-7Z','M9 11l-4 1-2 3 5 1','M13 15l-1 4-3 2-1-5'],
-  palette:['M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6H12a2 2 0 0 1 0-4h2a7 7 0 0 0-2-10Z'],
-  sliders:['M4 6h10','M18 6h2','M14 3v6','M4 18h4','M12 18h8','M8 15v6','M4 12h2','M10 12h10','M6 9v6'],
-  spark:['m12 3 1.4 4.2L18 9l-4.6 1.7L12 15l-1.4-4.3L6 9l4.6-1.8L12 3Z','m19 14 .7 2.1L22 17l-2.3.9L19 20l-.7-2.1L16 17l2.3-.9L19 14Z']
+  rocket:['M14 6 18 2l4 4-4 4','M13 7 7 13-3-6-6-3L24 0'], pause:['M8 5v14','M16 5v14'], trash:['M4 7h16','M9 7V4h6v3','m7 0 1 14h10l1-14'],
+  sliders:['M4 6h16','M8 6v0','M4 12h16','M15 12v0','M4 18h16','M11 18v0'], palette:['M12 3a9 9 0 1 0 0 18h1.5a1.5 1.5 0 0 0 0-3H11a2 2 0 0 1 0-4h4a6 6 0 0 0-3-11Z'],
+  spark:['m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8L12 3Z'], download:['M12 3v12','m7 10 5 5 5-5','M5 21h14'],
 };
 
 function Icon({ name, size = 15 }: { name: string; size?: number }) {
-  return <svg className="ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {(iconPaths[name] || iconPaths.code).map((d, i) => <path d={d} key={i} />)}
-  </svg>;
+  return <svg className="ico" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{(iconPaths[name] || iconPaths.editor).map((d,i)=><path d={d} key={i}/>)}</svg>;
+}
+function BrandMark({ size=20 }: { size?: number }) {
+  return <svg className="brand-mark" width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M5 18.5 11.8 6h4.4L9.4 18.5H5Z" fill="currentColor"/><path d="M11.8 22 18.6 9.5H23L16.2 22h-4.4Z" fill="currentColor" opacity=".48"/></svg>;
 }
 
-function BrandMark({ size = 20 }: { size?: number }) {
-  return <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <path d="M6.5 16c2.6-5.7 5.7-8.6 9.5-8.6 3.7 0 6.9 2.9 9.5 8.6-2.6 5.7-5.8 8.6-9.5 8.6-3.8 0-6.9-2.9-9.5-8.6Z" stroke="currentColor" strokeWidth="1.9" />
-    <path d="M10.2 21.8 21.9 10.1" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
-    <circle cx="16" cy="16" r="2.2" fill="currentColor" opacity=".9" />
-  </svg>;
+async function invokeSafe<T>(command: string, args: Record<string, unknown> = {}, fallback: T): Promise<T> {
+  try { return await invoke<T>(command, args); } catch (error) { console.error(command, error); return fallback; }
 }
-
-function WindowControls() {
-  return <div className="window-controls">
-    <button className="window-button" onClick={() => void safeInvoke('window_minimize', {}, null)} aria-label="Minimize"><Icon name="minus" size={14} /></button>
-    <button className="window-button" onClick={() => void safeInvoke('window_toggle_maximize', {}, null)} aria-label="Maximize"><Icon name="square" size={13} /></button>
-    <button className="window-button window-button--close" onClick={() => void safeInvoke('window_close', {}, null)} aria-label="Close"><Icon name="x" size={14} /></button>
-  </div>;
-}
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
-  return <button type="button" className={`toggle ${checked ? 'is-on' : ''}`} onClick={() => onChange(!checked)} aria-pressed={checked} aria-label={label}><span className="toggle-knob" /></button>;
-}
-
-function completionContext(value: string, caret: number): CompletionContext | null {
-  const before = value.slice(0, caret);
-  const match = before.match(/[A-Za-z_][A-Za-z0-9_:.]*$/);
-  if (!match) return null;
-  const prefix = match[0];
-  if (!prefix) return null;
-  const start = caret - prefix.length;
-  const lines = value.slice(0, start).split('\n');
-  return { start, end: caret, row: lines.length - 1, col: lines[lines.length - 1].length, prefix };
-}
+function sleep(ms:number){ return new Promise(resolve=>window.setTimeout(resolve,ms)); }
 
 const bootStages = [
-  ['Reading local preferences', 16],
-  ['Restoring workspace', 34],
-  ['Starting native shell', 56],
-  ['Checking local services', 73],
-  ['Indexing desktop clients', 89],
-  ['Ready', 100]
+  ['Loading interface', 16], ['Restoring workspace', 34], ['Starting native shell', 56], ['Reading local state', 73], ['Discovering clients', 89], ['Ready', 100]
 ] as const;
 
-export default function App() {
-  const stored = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as {
-        motion?: boolean; density?: Density; accent?: string; editorFontSize?: number; autocomplete?: boolean; outputAutoScroll?: boolean;
-        autoFolder?: string; tabs?: Tab[]; activeTab?: number; nextTab?: number;
-      };
-    } catch { return {}; }
-  }, []);
+export default function App(){
+  const stored = useMemo(()=>{ try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}') as {accent?:Accent;motion?:boolean;density?:Density;editorFontSize?:number;autocomplete?:boolean;timestamps?:boolean;maxOutput?:number;panelHeight?:number;tabs?:Tab[];activeTab?:number;nextTab?:number;autoFolder?:string;scriptFolder?:string};}catch{return {}; }},[]);
+  const [phase,setPhase]=useState<'splash'|'main'>(PREVIEW==='main'?'main':'splash');
+  const [bootTitle,setBootTitle]=useState('Booting native workspace');
+  const [progress,setProgress]=useState(PREVIEW==='splash'?61:4);
+  const [view,setView]=useState<View>('editor');
+  const [panel,setPanel]=useState<Panel>('output');
+  const [accent,setAccent]=useState<Accent>(stored.accent||'white');
+  const [motion,setMotion]=useState(stored.motion!==false);
+  const [density,setDensity]=useState<Density>(stored.density||'comfortable');
+  const [editorFontSize,setEditorFontSize]=useState(stored.editorFontSize||12);
+  const [autocomplete,setAutocomplete]=useState(stored.autocomplete!==false);
+  const [timestamps,setTimestamps]=useState(stored.timestamps!==false);
+  const [maxOutput,setMaxOutput]=useState(stored.maxOutput||220);
+  const [panelHeight,setPanelHeight]=useState(stored.panelHeight||174);
+  const [tabs,setTabs]=useState<Tab[]>(stored.tabs?.length?stored.tabs:[{id:1,name:'Tab #1',content:DEFAULT_SCRIPT,dirty:false}]);
+  const [activeTabId,setActiveTabId]=useState(stored.activeTab||1);
+  const [nextTabId,setNextTabId]=useState(stored.nextTab||2);
+  const [runtime,setRuntime]=useState<RuntimeStatus>({online:false,port:6969,mode:'detached'});
+  const [clients,setClients]=useState<ClientInfo[]>([]);
+  const [output,setOutput]=useState<OutputEntry[]>([]);
+  const [outputPaused,setOutputPaused]=useState(false);
+  const [outputQuery,setOutputQuery]=useState('');
+  const [terminal,setTerminal]=useState<OutputEntry[]>([{level:'info',message:'Native workspace initialized.'}]);
+  const [problems,setProblems]=useState<OutputEntry[]>([]);
+  const [appInfo,setAppInfo]=useState<AppInfo>({version:'2.2.0',platform:'windows',arch:'x86_64'});
+  const [scriptFolder,setScriptFolder]=useState(stored.scriptFolder||'');
+  const [scriptFiles,setScriptFiles]=useState<FolderScript[]>([]);
+  const [autoFolder,setAutoFolder]=useState(stored.autoFolder||'');
+  const [autoFiles,setAutoFiles]=useState<FolderScript[]>([]);
+  const [scriptQuery,setScriptQuery]=useState('');
+  const [scriptResults,setScriptResults]=useState<ScriptItem[]>([]);
+  const [scriptPage,setScriptPage]=useState(1);
+  const [scriptTotalPages,setScriptTotalPages]=useState(1);
+  const [scriptLoading,setScriptLoading]=useState(false);
+  const [scriptError,setScriptError]=useState('');
+  const [filterVerified,setFilterVerified]=useState(false);
+  const [filterUniversal,setFilterUniversal]=useState(false);
+  const [filterKeyless,setFilterKeyless]=useState(false);
+  const [filterUnpatched,setFilterUnpatched]=useState(false);
+  const [injectState,setInjectState]=useState<'idle'|'injecting'|'ready'>('idle');
+  const [injectLabel,setInjectLabel]=useState('Inject');
+  const [injectProgress,setInjectProgress]=useState(0);
+  const [executeState,setExecuteState]=useState<'idle'|'checking'|'ready'>('idle');
+  const [toast,setToast]=useState<string|null>(null);
+  const [suggestions,setSuggestions]=useState<Completion[]>([]);
+  const [suggestIndex,setSuggestIndex]=useState(0);
+  const [suggestPrefix,setSuggestPrefix]=useState('');
+  const [suggestPos,setSuggestPos]=useState({left:70,top:38});
+  const editorRef=useRef<HTMLTextAreaElement>(null);
+  const gutterRef=useRef<HTMLPreElement>(null);
+  const toastTimer=useRef<number|undefined>(undefined);
 
-  const [phase, setPhase] = useState<'splash' | 'main'>(PREVIEW === 'main' ? 'main' : 'splash');
-  const [progress, setProgress] = useState(PREVIEW === 'splash' ? 63 : 4);
-  const [bootTitle, setBootTitle] = useState('Starting workspace');
-  const [view, setView] = useState<View>('editor');
-  const [panel, setPanel] = useState<Panel>('output');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
-  const [motion, setMotion] = useState(stored.motion !== false);
-  const [density, setDensity] = useState<Density>(stored.density || 'compact');
-  const [accent, setAccent] = useState(stored.accent || '#7c8cff');
-  const [editorFontSize, setEditorFontSize] = useState(Math.min(16, Math.max(10, stored.editorFontSize || 12)));
-  const [autocomplete, setAutocomplete] = useState(stored.autocomplete !== false);
-  const [outputAutoScroll, setOutputAutoScroll] = useState(stored.outputAutoScroll !== false);
-  const [scriptsOpen, setScriptsOpen] = useState(true);
-  const [autoOpen, setAutoOpen] = useState(true);
-  const [autoFolder, setAutoFolder] = useState(stored.autoFolder || '');
-  const [autoScripts, setAutoScripts] = useState<FolderScript[]>([]);
-  const [tabs, setTabs] = useState<Tab[]>(stored.tabs?.length ? stored.tabs : [{ id: 1, name: 'Tab #1', content: DEFAULT_SCRIPT, dirty: false }]);
-  const [activeTabId, setActiveTabId] = useState(stored.activeTab || 1);
-  const [nextTabId, setNextTabId] = useState(stored.nextTab || 2);
-  const [runtime, setRuntime] = useState<RuntimeStatus>({ online: false, port: 6969, mode: 'detached' });
-  const [clients, setClients] = useState<ClientInfo[]>([]);
-  const [output, setOutput] = useState<OutputEntry[]>([]);
-  const [terminal, setTerminal] = useState<OutputEntry[]>([{ level: 'info', message: 'Tauri workspace ready.' }]);
-  const [problems] = useState<OutputEntry[]>([]);
-  const [outputQuery, setOutputQuery] = useState('');
-  const [scriptQuery, setScriptQuery] = useState('');
-  const [scriptResults, setScriptResults] = useState<ScriptItem[]>([]);
-  const [scriptPage, setScriptPage] = useState(1);
-  const [scriptTotalPages, setScriptTotalPages] = useState(1);
-  const [scriptLoading, setScriptLoading] = useState(false);
-  const [scriptError, setScriptError] = useState('');
-  const [injectPhase, setInjectPhase] = useState<InjectPhase>('idle');
-  const [toast, setToast] = useState<string | null>(null);
-  const [appInfo, setAppInfo] = useState<AppInfo>({ version: '2.1.0', platform: 'windows', arch: 'x86_64' });
-  const [completion, setCompletion] = useState<CompletionContext | null>(null);
-  const [completionIndex, setCompletionIndex] = useState(0);
-  const [editorScroll, setEditorScroll] = useState({ top: 0, left: 0 });
+  const activeTab=tabs.find(t=>t.id===activeTabId)||tabs[0];
+  const lineNumbers=useMemo(()=>Array.from({length:Math.max(1,activeTab?.content.split('\n').length||1)},(_,i)=>i+1).join('\n'),[activeTab?.content]);
+  const appStyle={ '--accent':ACCENTS[accent], '--editor-font':`${editorFontSize}px`, '--panel-h':`${panelHeight}px` } as React.CSSProperties;
 
-  const gutterRef = useRef<HTMLPreElement>(null);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  const consoleRef = useRef<HTMLDivElement>(null);
-  const toastTimer = useRef<number | undefined>(undefined);
-  const injectTimers = useRef<number[]>([]);
+  const showToast=(message:string)=>{setToast(message);window.clearTimeout(toastTimer.current);toastTimer.current=window.setTimeout(()=>setToast(null),1700);};
+  const pushTerminal=(message:string,level:OutputLevel='info')=>setTerminal(rows=>[...rows.slice(-250),{level,message,timestamp:new Date().toISOString()}]);
 
-  const activeTab = tabs.find(tab => tab.id === activeTabId) || tabs[0];
-  const lineHeight = editorFontSize + 8;
-  const lineNumbers = useMemo(() => Array.from({ length: Math.max(1, activeTab?.content.split('\n').length || 1) }, (_, index) => index + 1).join('\n'), [activeTab?.content]);
-  const completionItems = useMemo(() => {
-    if (!autocomplete || !completion) return [];
-    const prefix = completion.prefix.toLowerCase();
-    return LUAU_COMPLETIONS.filter(item => item.label.toLowerCase().startsWith(prefix)).slice(0, 7);
-  }, [autocomplete, completion]);
+  useEffect(()=>{
+    const payload={accent,motion,density,editorFontSize,autocomplete,timestamps,maxOutput,panelHeight,tabs,activeTab:activeTabId,nextTab:nextTabId,autoFolder,scriptFolder};
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(payload));
+    void invokeSafe('save_settings',{value:{accent,motion,density,editorFontSize,autocomplete,timestamps,maxOutput,panelHeight} satisfies SettingsPayload},null);
+  },[accent,motion,density,editorFontSize,autocomplete,timestamps,maxOutput,panelHeight,tabs,activeTabId,nextTabId,autoFolder,scriptFolder]);
 
-  const rootStyle = { '--accent': accent, '--editor-font': `${editorFontSize}px`, '--editor-line': `${lineHeight}px` } as React.CSSProperties;
-
-  const showToast = (message: string) => {
-    setToast(message);
-    window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 1700);
-  };
-
-  useEffect(() => () => injectTimers.current.forEach(timer => window.clearTimeout(timer)), []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ motion, density, accent, editorFontSize, autocomplete, outputAutoScroll, autoFolder, tabs, activeTab: activeTabId, nextTab: nextTabId }));
-    void safeInvoke('save_settings', { value: { motion, density, accent, editorFontSize, autocomplete, outputAutoScroll, autoFolder } satisfies SettingsPayload }, null);
-  }, [motion, density, accent, editorFontSize, autocomplete, outputAutoScroll, autoFolder, tabs, activeTabId, nextTabId]);
-
-  useEffect(() => {
-    if (!autoFolder) { setAutoScripts([]); return; }
-    void safeInvoke<FolderScript[]>('list_folder_scripts', { path: autoFolder }, []).then(setAutoScripts);
-  }, [autoFolder]);
-
-  useEffect(() => {
-    if (PREVIEW === 'splash' || PREVIEW === 'main') return;
-    let cancelled = false;
-    (async () => {
-      for (const [title, pct] of bootStages) {
-        if (cancelled) return;
-        setBootTitle(title);
-        setProgress(pct);
-        if (pct === 34) {
-          const settings = await safeInvoke<SettingsPayload>('load_settings', {}, {});
-          if (typeof settings.motion === 'boolean') setMotion(settings.motion);
-          if (settings.density) setDensity(settings.density);
-          if (settings.accent) setAccent(settings.accent);
-          if (settings.editorFontSize) setEditorFontSize(settings.editorFontSize);
-          if (typeof settings.autocomplete === 'boolean') setAutocomplete(settings.autocomplete);
-          if (typeof settings.outputAutoScroll === 'boolean') setOutputAutoScroll(settings.outputAutoScroll);
-          if (settings.autoFolder) setAutoFolder(settings.autoFolder);
-        }
-        if (pct === 56) setAppInfo(await safeInvoke<AppInfo>('app_info', {}, appInfo));
-        if (pct === 73) setRuntime(await safeInvoke<RuntimeStatus>('runtime_status', { port: 6969 }, { online: false, port: 6969, mode: 'detached' }));
-        if (pct === 89) setClients(await safeInvoke<ClientInfo[]>('list_clients', {}, []));
-        await new Promise(resolve => window.setTimeout(resolve, 150));
+  useEffect(()=>{
+    if(PREVIEW) return;
+    let cancelled=false;
+    (async()=>{
+      for(const [title,pct] of bootStages){ if(cancelled)return; setBootTitle(title);setProgress(pct);
+        if(pct===34){const s=await invokeSafe<SettingsPayload>('load_settings',{},{});if(s.accent)setAccent(s.accent);if(typeof s.motion==='boolean')setMotion(s.motion);if(s.density)setDensity(s.density);if(s.editorFontSize)setEditorFontSize(s.editorFontSize);if(typeof s.autocomplete==='boolean')setAutocomplete(s.autocomplete);if(typeof s.timestamps==='boolean')setTimestamps(s.timestamps);if(s.maxOutput)setMaxOutput(s.maxOutput);if(s.panelHeight)setPanelHeight(s.panelHeight);}
+        if(pct===56)setAppInfo(await invokeSafe('app_info',{},appInfo));
+        if(pct===73)setRuntime(await invokeSafe('runtime_status',{port:6969},{online:false,port:6969,mode:'detached'}));
+        if(pct===89)setClients(await invokeSafe('list_clients',{},[]));
+        await sleep(145);
       }
-      await safeInvoke('promote_main_window', {}, null);
-      if (!cancelled) setPhase('main');
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      await invokeSafe('promote_main_window',{},null); if(!cancelled)setPhase('main');
+    })();return()=>{cancelled=true;};
+  },[]);
 
-  useEffect(() => {
-    if (phase !== 'main') return;
-    let cancelled = false;
-    const poll = async () => {
-      const [nextClients, nextRuntime, nextOutput] = await Promise.all([
-        safeInvoke<ClientInfo[]>('list_clients', {}, []),
-        safeInvoke<RuntimeStatus>('runtime_status', { port: 6969 }, { online: false, port: 6969, mode: 'detached' }),
-        safeInvoke<OutputEntry[]>('read_roblox_output', { limit: 180 }, [])
-      ]);
-      if (!cancelled) { setClients(nextClients); setRuntime(nextRuntime); setOutput(nextOutput); }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1900);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [phase]);
+  useEffect(()=>{
+    if(phase!=='main')return;let cancelled=false;
+    const poll=async()=>{const [nextClients,nextRuntime,nextOutput]=await Promise.all([invokeSafe<ClientInfo[]>('list_clients',{},[]),invokeSafe<RuntimeStatus>('runtime_status',{port:6969},{online:false,port:6969,mode:'detached'}),outputPaused?Promise.resolve(output):invokeSafe<OutputEntry[]>('read_roblox_output',{limit:maxOutput},[])]);if(!cancelled){setClients(nextClients);setRuntime(nextRuntime);if(!outputPaused)setOutput(nextOutput);}};
+    void poll();const timer=window.setInterval(()=>void poll(),1700);return()=>{cancelled=true;window.clearInterval(timer);};
+  },[phase,outputPaused,maxOutput]);
 
-  useEffect(() => {
-    if (panel === 'output' && outputAutoScroll && consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-  }, [output, panel, outputAutoScroll]);
+  useEffect(()=>{if(scriptFolder)void refreshFolder(scriptFolder,false);},[]);
+  useEffect(()=>{if(autoFolder)void refreshFolder(autoFolder,true);},[]);
 
-  const addTab = (content = '', name?: string) => {
-    const id = nextTabId;
-    setTabs(current => [...current, { id, name: name || `Tab #${id}`, content, dirty: Boolean(content) }]);
-    setActiveTabId(id);
-    setNextTabId(id + 1);
-    setCompletion(null);
+  const startDrag=(event:React.PointerEvent<HTMLElement>)=>{if(event.button!==0)return;const target=event.target as HTMLElement;if(target.closest('button,input,textarea,a,[data-no-drag]'))return;void invokeSafe('window_start_dragging',{},null);};
+  const addTab=(content='',name?:string)=>{const id=nextTabId;setTabs(current=>[...current,{id,name:name||`Tab #${id}`,content,dirty:Boolean(content)}]);setActiveTabId(id);setNextTabId(id+1);setView('editor');};
+  const closeTab=(id:number)=>{if(tabs.length===1)return;const index=tabs.findIndex(t=>t.id===id);const next=tabs.filter(t=>t.id!==id);setTabs(next);if(activeTabId===id)setActiveTabId(next[Math.min(index,next.length-1)].id);};
+  const updateActive=(content:string)=>setTabs(current=>current.map(t=>t.id===activeTabId?{...t,content,dirty:true}:t));
+  const clearEditor=()=>{updateActive('');setSuggestions([]);};
+
+  const openFile=async()=>{const data=await invokeSafe<OpenedScript|null>('open_script',{},null);if(data)addTab(data.content,data.name);};
+  const openPath=async(path:string)=>{const data=await invokeSafe<OpenedScript|null>('read_script_path',{path},null);if(data)addTab(data.content,data.name);};
+  const saveFile=async()=>{if(!activeTab)return;const result=await invokeSafe<SavedScript|null>('save_script',{suggestedName:activeTab.name.endsWith('.lua')||activeTab.name.endsWith('.luau')?activeTab.name:`${activeTab.name}.luau`,content:activeTab.content},null);if(result){setTabs(current=>current.map(t=>t.id===activeTabId?{...t,name:result.name,dirty:false}:t));showToast('Saved');}};
+  const chooseFolder=async(auto:boolean)=>{const path=await invokeSafe<string|null>('choose_script_folder',{},null);if(!path)return;if(auto)setAutoFolder(path);else setScriptFolder(path);await refreshFolder(path,auto);};
+  const refreshFolder=async(path:string,auto:boolean)=>{const rows=await invokeSafe<FolderScript[]>('list_folder_scripts',{path},[]);auto?setAutoFiles(rows):setScriptFiles(rows);};
+
+  const updateCompletions=(value:string,caret:number,scrollTop=0,scrollLeft=0)=>{
+    if(!autocomplete){setSuggestions([]);return;}
+    const before=value.slice(0,caret);const match=before.match(/([A-Za-z_][A-Za-z0-9_]*)$/);const prefix=match?.[1]||'';
+    if(prefix.length<1){setSuggestions([]);return;}
+    const matches=LUAU_COMPLETIONS.filter(item=>item.label.toLowerCase().startsWith(prefix.toLowerCase())&&item.label!==prefix).slice(0,8);
+    if(!matches.length){setSuggestions([]);return;}
+    const lines=before.split('\n');const line=lines.length-1;const col=lines[lines.length-1].length;
+    setSuggestPrefix(prefix);setSuggestions(matches);setSuggestIndex(0);setSuggestPos({left:Math.min(520,55+col*(editorFontSize*.61)-scrollLeft),top:Math.min(330,17+(line+1)*20-scrollTop)});
+  };
+  const acceptSuggestion=(item=suggestions[suggestIndex])=>{if(!item||!editorRef.current)return;const el=editorRef.current;const caret=el.selectionStart;const start=caret-suggestPrefix.length;const next=(activeTab?.content||'').slice(0,start)+item.label+(activeTab?.content||'').slice(caret);updateActive(next);setSuggestions([]);window.requestAnimationFrame(()=>{el.focus();el.setSelectionRange(start+item.label.length,start+item.label.length);});};
+  const editorKeyDown=(event:React.KeyboardEvent<HTMLTextAreaElement>)=>{
+    if(suggestions.length){if(event.key==='ArrowDown'){event.preventDefault();setSuggestIndex(i=>(i+1)%suggestions.length);return;}if(event.key==='ArrowUp'){event.preventDefault();setSuggestIndex(i=>(i-1+suggestions.length)%suggestions.length);return;}if(event.key==='Tab'||event.key==='Enter'){event.preventDefault();acceptSuggestion();return;}if(event.key==='Escape'){setSuggestions([]);return;}}
+    if(event.key==='Tab'){event.preventDefault();const el=event.currentTarget;const start=el.selectionStart,end=el.selectionEnd;const next=(activeTab?.content||'').slice(0,start)+'    '+(activeTab?.content||'').slice(end);updateActive(next);window.requestAnimationFrame(()=>el.setSelectionRange(start+4,start+4));}
   };
 
-  const closeTab = (id: number) => {
-    if (tabs.length === 1) return;
-    const index = tabs.findIndex(tab => tab.id === id);
-    const nextTabs = tabs.filter(tab => tab.id !== id);
-    setTabs(nextTabs);
-    if (activeTabId === id) setActiveTabId(nextTabs[Math.min(index, nextTabs.length - 1)].id);
-  };
+  const executeReference=async()=>{if(!activeTab||executeState==='checking')return;setExecuteState('checking');setPanel('terminal');const plan=await invokeSafe<ReferencePlan>('reference_execute_plan',{script:activeTab.content},{ok:false,mode:'reference-only',stages:[],warnings:['Reference planner unavailable'],externalEffects:0,targetWiring:false});setProblems((plan.warnings||[]).map(message=>({level:'warning',message})));pushTerminal(`[execute/reference] ${plan.ok?'preflight accepted':'preflight rejected'} · ${plan.lineCount||0} lines · ${plan.tokenCount||0} tokens`);for(const stage of plan.stages){pushTerminal(`→ ${stage.name}: ${stage.detail}`);await sleep(Math.min(stage.durationMs,240));}pushTerminal(`[boundary] external effects=${plan.externalEffects}, target wiring=${plan.targetWiring}`);setExecuteState(plan.ok?'ready':'idle');window.setTimeout(()=>setExecuteState('idle'),1000);};
+  const injectReference=async()=>{if(injectState==='injecting')return;setInjectState('injecting');setInjectProgress(2);setPanel('terminal');const plan=await invokeSafe<ReferencePlan>('reference_inject_plan',{}, {ok:true,mode:'reference-only',stages:[],externalEffects:0,targetWiring:false});pushTerminal('[inject/reference] internal planning pipeline started');let done=0;for(const stage of plan.stages){setInjectLabel(stage.name);pushTerminal(`→ ${stage.name}: ${stage.detail}`);await sleep(Math.min(stage.durationMs,300));done++;setInjectProgress(Math.round(done/Math.max(1,plan.stages.length)*100));}pushTerminal(`[boundary] sealed · external effects=${plan.externalEffects} · target wiring=${plan.targetWiring}`);setInjectLabel('Ready');setInjectState('ready');setInjectProgress(100);window.setTimeout(()=>{setInjectState('idle');setInjectLabel('Inject');setInjectProgress(0);},1500);};
 
-  const updateActiveTab = (content: string) => setTabs(current => current.map(tab => tab.id === activeTabId ? { ...tab, content, dirty: true } : tab));
+  const launchRoblox=async()=>{const ok=await invokeSafe<{ok:boolean}|null>('launch_roblox',{},null);showToast(ok?'Roblox launch requested':'Could not launch Roblox');window.setTimeout(()=>void invokeSafe<ClientInfo[]>('list_clients',{},[]).then(setClients),1200);};
+  const closeClient=async(pid:number)=>{if(!window.confirm(`Close Roblox client ${pid}?`))return;const result=await invokeSafe<{ok:boolean}|null>('close_client',{pid},null);showToast(result?.ok?'Client closed':'Close failed');setClients(await invokeSafe('list_clients',{},[]));};
 
-  const refreshCompletion = (value: string, caret: number) => {
-    const ctx = autocomplete ? completionContext(value, caret) : null;
-    setCompletion(ctx);
-    setCompletionIndex(0);
-  };
+  const searchScripts=async(page=1)=>{setScriptLoading(true);setScriptError('');try{const result=await invoke<ScriptSearchResult>('scriptblox_search',{query:scriptQuery,page,verified:filterVerified?true:null,universal:filterUniversal?true:null,keyless:filterKeyless?true:null,unpatched:filterUnpatched?true:null});setScriptResults(result.scripts||[]);setScriptPage(result.page||page);setScriptTotalPages(Math.max(1,result.totalPages||1));}catch(error){setScriptError(String(error));setScriptResults([]);}finally{setScriptLoading(false);}};
+  const openScriptItem=async(item:ScriptItem)=>{let source=item.script||'';const identifier=item.slug||item.id||'';if(!source&&identifier){const result=await invokeSafe<{script:string}>('scriptblox_raw',{identifier},{script:''});source=result.script||'';}if(!source){showToast('No source returned');return;}addTab(source,`${item.title||'Script'}.luau`);};
+  const saveOutput=async()=>{const text=output.map(row=>`${row.timestamp||''} [${row.level}] ${row.message}`).join('\n');const result=await invokeSafe<{ok:boolean}|null>('save_text_file',{suggestedName:'roblox-output.txt',content:text},null);if(result)showToast('Output saved');};
 
-  const applyCompletion = (item: Completion) => {
-    if (!completion || !activeTab) return;
-    const next = activeTab.content.slice(0, completion.start) + item.insert + activeTab.content.slice(completion.end);
-    const caret = completion.start + item.insert.length + (item.cursorOffset || 0);
-    updateActiveTab(next);
-    setCompletion(null);
-    window.requestAnimationFrame(() => {
-      editorRef.current?.focus();
-      editorRef.current?.setSelectionRange(caret, caret);
-    });
-  };
+  if(phase==='splash')return <div className="boot-shell">
+    <div className="boot-noise"/><div className="boot-rule boot-rule-a"/><div className="boot-rule boot-rule-b"/>
+    <header className="boot-top" onPointerDown={startDrag}><div className="boot-brand"><BrandMark size={19}/><span>osirhidden</span></div><div className="boot-build">DESKTOP / 2.2</div></header>
+    <main className="boot-center"><div className="boot-index">01</div><div className="boot-emblem"><span/><BrandMark size={58}/><i/></div><div className="boot-copy"><strong>NATIVE WORKSPACE</strong><span>TAURI · REACT · TSX</span></div></main>
+    <footer className="boot-footer"><div className="boot-status"><span>{bootTitle}</span><b>{String(progress).padStart(2,'0')}%</b></div><div className="boot-segments">{Array.from({length:24},(_,i)=><i key={i} className={i<Math.round(progress/100*24)?'is-on':''}/>)}</div></footer>
+  </div>;
 
-  const openFile = async () => {
-    const data = await safeInvoke<OpenedScript | null>('open_script', {}, null);
-    if (data) addTab(data.content, data.name);
-  };
+  const filteredOutput=output.filter(row=>row.message.toLowerCase().includes(outputQuery.toLowerCase()));
+  const currentRows=panel==='output'?filteredOutput:panel==='terminal'?terminal:problems;
 
-  const saveFile = async () => {
-    if (!activeTab) return;
-    const result = await safeInvoke<SavedScript | null>('save_script', { suggestedName: activeTab.name.endsWith('.lua') ? activeTab.name : `${activeTab.name}.lua`, content: activeTab.content }, null);
-    if (!result) return;
-    setTabs(current => current.map(tab => tab.id === activeTabId ? { ...tab, name: result.name, dirty: false } : tab));
-    showToast('Saved');
-  };
-
-  const chooseAutoFolder = async () => {
-    const path = await safeInvoke<string | null>('choose_autoexec_folder', {}, null);
-    if (path) { setAutoFolder(path); showToast('Auto-Execute folder selected'); }
-  };
-
-  const openFolderScript = async (script: FolderScript) => {
-    const data = await safeInvoke<OpenedScript | null>('read_script_path', { path: script.path }, null);
-    if (data) addTab(data.content, data.name);
-  };
-
-  const searchScripts = async (page = 1) => {
-    setScriptLoading(true); setScriptError('');
-    try {
-      const result = await safeInvoke<ScriptSearchResult>('scriptblox_search', { query: scriptQuery, page }, { scripts: [], page, totalPages: 1 });
-      setScriptResults(result.scripts || []); setScriptPage(result.page || page); setScriptTotalPages(result.totalPages || 1);
-    } catch (error) { setScriptError(String(error)); }
-    finally { setScriptLoading(false); }
-  };
-
-  const openScriptItem = async (item: ScriptItem) => {
-    let source = item.script || '';
-    const identifier = item.slug || item.id || '';
-    if (!source && identifier) source = (await safeInvoke<{ script: string }>('scriptblox_raw', { identifier }, { script: '' })).script || '';
-    if (!source) return;
-    addTab(source, `${item.title || 'Script'}.lua`); setView('editor');
-  };
-
-  const closeClient = async (pid: number) => {
-    if (!window.confirm(`Close detected Roblox client ${pid}?`)) return;
-    try { await safeInvoke('close_client', { pid }, null); showToast('Client closed'); }
-    catch (error) { showToast(String(error)); }
-  };
-
-  const launchRoblox = async () => {
-    try { await safeInvoke('launch_roblox', {}, null); showToast('Roblox launch requested'); }
-    catch (error) { showToast(String(error)); }
-  };
-
-  const startInjectAnimation = () => {
-    if (injectPhase === 'injecting') return;
-    injectTimers.current.forEach(timer => window.clearTimeout(timer)); injectTimers.current = [];
-    setInjectPhase('injecting');
-    setPanel('terminal');
-    setTerminal(current => [...current, { level: 'info', message: 'Inject UI sequence started. No process injection is connected in this build.' }]);
-    injectTimers.current.push(window.setTimeout(() => setInjectPhase('ready'), 900));
-    injectTimers.current.push(window.setTimeout(() => setInjectPhase('idle'), 1900));
-  };
-
-  if (phase === 'splash') {
-    return <div className="boot-shell" style={rootStyle}>
-      <div className="boot-aura" />
-      <div className="boot-lines" />
-      <header className="boot-header"><div className="boot-brand"><BrandMark size={22} /><span>osirhidden</span></div><span className="boot-build">DESKTOP / 2.1</span></header>
-      <main className="boot-body">
-        <div className="boot-copy-block"><span className="boot-eyebrow">NATIVE WORKSPACE</span><h1>Quietly preparing<br />your workspace.</h1><p>{bootTitle}</p></div>
-        <div className="boot-core">
-          <div className="boot-core-mark"><BrandMark size={44} /></div>
-          <div className="boot-core-ring" />
-          <span>CORE</span>
-        </div>
-        <div className="boot-checks">
-          {bootStages.slice(0, 5).map(([label, pct]) => <div className={`boot-check ${progress >= pct ? 'is-done' : progress + 20 >= pct ? 'is-active' : ''}`} key={label}><i /> <span>{label}</span><b>{progress >= pct ? 'OK' : '—'}</b></div>)}
-        </div>
-      </main>
-      <footer className="boot-footer"><div className="boot-progress"><div style={{ width: `${progress}%` }} /></div><span>{String(progress).padStart(2, '0')}%</span></footer>
-    </div>;
-  }
-
-  const filteredOutput = output.filter(row => row.message.toLowerCase().includes(outputQuery.toLowerCase()));
-  const currentRows = panel === 'output' ? filteredOutput : panel === 'terminal' ? terminal : problems;
-  const completionStyle = completion ? {
-    left: Math.max(48, 58 + completion.col * (editorFontSize * 0.61) - editorScroll.left),
-    top: Math.max(8, 14 + (completion.row + 1) * lineHeight - editorScroll.top)
-  } : undefined;
-
-  return <div className={`app density-${density} ${motion ? '' : 'reduce-motion'}`} style={rootStyle}>
+  return <div className={`app density-${density} ${motion?'':'reduce-motion'}`} style={appStyle}>
     <div className="app-frame">
-      <header className="titlebar" data-tauri-drag-region>
-        <div className="brand" data-tauri-drag-region><BrandMark size={19} /><strong>osirhidden</strong><span className="version-pill">2.1</span></div>
-        <nav className="top-nav" aria-label="Main navigation">
-          {([['editor','code','Editor'],['scripts','globe','Scripts'],['clients','users','Clients'],['settings','settings','Settings']] as const).map(([id, icon, label]) =>
-            <button key={id} className={`top-nav-button ${view === id ? 'is-active' : ''}`} onClick={() => setView(id)}><Icon name={icon} /> <span>{label}</span></button>
-          )}
-        </nav>
-        <WindowControls />
+      <header className="titlebar" onPointerDown={startDrag}>
+        <div className="brand"><BrandMark size={18}/><strong>osirhidden</strong><span className="version-pill">2.2</span></div>
+        <nav className="top-nav" data-no-drag>{([['editor','editor','Editor'],['scripts','search','Scripts'],['clients','users','Clients'],['settings','settings','Settings']] as const).map(([id,icon,label])=><button key={id} className={view===id?'is-active':''} onClick={()=>setView(id)}><Icon name={icon} size={14}/><span>{label}</span></button>)}</nav>
+        <div className="title-actions" data-no-drag><button className="roblox-mini" onClick={()=>void launchRoblox()}><Icon name="rocket" size={13}/>Launch Roblox</button><div className="window-controls"><button onClick={()=>void invokeSafe('window_minimize',{},null)}><Icon name="minus" size={13}/></button><button onClick={()=>void invokeSafe('window_toggle_maximize',{},null)}><Icon name="square" size={12}/></button><button className="close" onClick={()=>void invokeSafe('window_close',{},null)}><Icon name="x" size={13}/></button></div></div>
       </header>
 
-      <main className={`workspace ${view === 'editor' ? '' : 'workspace--wide'}`}>
-        {view === 'editor' && <aside className="explorer">
-          <div className="explorer-title"><span>EXPLORER</span><button aria-label="Explorer options">•••</button></div>
-          <section className="tree-section">
-            <button className="tree-heading" onClick={() => setScriptsOpen(value => !value)}><Icon name="chevron" size={12} /><Icon name="folder" size={13} /><span>Scripts</span></button>
-            <div className={`tree-content ${scriptsOpen ? 'is-open' : ''}`}><div className="tree-content-inner">
-              {['welcome.lua','movement.lua','ui-test.lua'].map(name => <button className="tree-file" key={name} onClick={() => addTab(`-- ${name}\n`, name)}><Icon name="file" size={12} /><span>{name}</span></button>)}
-            </div></div>
-          </section>
-          <section className="tree-section">
-            <button className="tree-heading" onClick={() => setAutoOpen(value => !value)}><Icon name="chevron" size={12} /><Icon name="folder" size={13} /><span>Auto-Execute</span><em>{autoScripts.length || ''}</em></button>
-            <div className={`tree-content ${autoOpen ? 'is-open' : ''}`}><div className="tree-content-inner">
-              {!autoFolder ? <button className="tree-empty-button" onClick={() => void chooseAutoFolder()}>Choose folder…</button> : autoScripts.length === 0 ? <div className="tree-empty">No .lua/.luau files</div> : autoScripts.map(script => <button className="tree-file" key={script.path} onClick={() => void openFolderScript(script)}><Icon name="file" size={12} /><span>{script.name}</span></button>)}
-            </div></div>
-          </section>
-        </aside>}
+      <main className="workspace">
+        <aside className="explorer">
+          <div className="explorer-head"><span>EXPLORER</span><button title="Refresh folders" onClick={()=>{if(scriptFolder)void refreshFolder(scriptFolder,false);if(autoFolder)void refreshFolder(autoFolder,true);}}><Icon name="refresh" size={12}/></button></div>
+          <ExplorerSection title="Scripts" files={scriptFiles} path={scriptFolder} onChoose={()=>void chooseFolder(false)} onOpen={path=>void openPath(path)}/>
+          <ExplorerSection title="Auto-Execute" files={autoFiles} path={autoFolder} onChoose={()=>void chooseFolder(true)} onOpen={path=>void openPath(path)}/>
+          <div className="explorer-foot"><span className={runtime.online?'online':''}/><div><strong>{runtime.online?`Listener :${runtime.port}`:'Runtime detached'}</strong><small>{clients.length} Roblox client{clients.length===1?'':'s'}</small></div></div>
+        </aside>
 
         <section className="content-area">
-          {view === 'editor' && <div className="editor-layout view-enter">
-            <div className="tabbar"><div className="tab-strip">
-              {tabs.map(tab => <div key={tab.id} className={`editor-tab ${activeTabId === tab.id ? 'is-active' : ''}`}>
-                <button className="tab-main" onClick={() => { setActiveTabId(tab.id); setCompletion(null); }}><span className="tab-accent" /><span className="tab-label">{tab.name}</span>{tab.dirty && <span className="dirty-dot" />}</button>
-                <button className="tab-close" onClick={() => closeTab(tab.id)} aria-label={`Close ${tab.name}`}><Icon name="x" size={11} /></button>
-              </div>)}
-              <button className="new-tab" onClick={() => addTab()} aria-label="New tab"><Icon name="plus" size={13} /></button>
-            </div></div>
-
-            <div className="commandbar">
-              <div className="command-left">
-                <button className="command-button" onClick={() => setTerminal(current => [...current, { level: 'info', message: runtime.online ? 'Local listener detected; execution bridge is not connected.' : 'Local listener detached.' }])}><Icon name="play" size={12} />Execute</button>
-                <button className="command-button" onClick={() => updateActiveTab('')}>Clear</button><span className="command-divider" />
-                <button className="command-button" onClick={() => void openFile()}><Icon name="open" size={12} />Open</button>
-                <button className="command-button" onClick={() => void saveFile()}><Icon name="save" size={12} />Save</button>
-                <button className="command-button" onClick={() => { void navigator.clipboard?.writeText(activeTab?.content || ''); showToast('Copied'); }}><Icon name="copy" size={12} />Copy</button>
-              </div>
-              <div className="command-right">
-                <div className="runtime-badge"><span className={`runtime-dot ${runtime.online ? 'is-online' : ''}`} />{runtime.online ? `Local :${runtime.port}` : 'Detached'}</div>
-                <button className={`inject-button inject-${injectPhase}`} onClick={startInjectAnimation} disabled={injectPhase === 'injecting'}>
-                  <span className="inject-icon">{injectPhase === 'ready' ? <Icon name="check" size={12} /> : <Icon name="bolt" size={12} />}</span><span>{injectPhase === 'injecting' ? 'Injecting…' : injectPhase === 'ready' ? 'Ready' : 'Inject'}</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="editor-surface">
-              <pre className="line-gutter" ref={gutterRef} aria-hidden="true">{lineNumbers}</pre>
-              <textarea
-                ref={editorRef}
-                className="code-editor"
-                spellCheck={false}
-                value={activeTab?.content || ''}
-                onChange={event => { updateActiveTab(event.target.value); refreshCompletion(event.target.value, event.target.selectionStart); }}
-                onClick={event => refreshCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
-                onKeyUp={event => { if (!['ArrowDown','ArrowUp','Enter','Tab','Escape'].includes(event.key)) refreshCompletion(event.currentTarget.value, event.currentTarget.selectionStart); }}
-                onKeyDown={event => {
-                  if (completionItems.length === 0) return;
-                  if (event.key === 'ArrowDown') { event.preventDefault(); setCompletionIndex(index => (index + 1) % completionItems.length); }
-                  else if (event.key === 'ArrowUp') { event.preventDefault(); setCompletionIndex(index => (index - 1 + completionItems.length) % completionItems.length); }
-                  else if (event.key === 'Tab' || event.key === 'Enter') { event.preventDefault(); applyCompletion(completionItems[completionIndex] || completionItems[0]); }
-                  else if (event.key === 'Escape') { event.preventDefault(); setCompletion(null); }
-                }}
-                onScroll={event => {
-                  const next = { top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft };
-                  setEditorScroll(next);
-                  if (gutterRef.current) gutterRef.current.scrollTop = next.top;
-                }}
-              />
-              {completion && completionItems.length > 0 && <div className="completion-popup" style={completionStyle}>
-                <div className="completion-head"><span>Luau</span><kbd>Tab</kbd></div>
-                {completionItems.map((item, index) => <button key={`${item.label}-${index}`} className={completionIndex === index ? 'is-selected' : ''} onMouseDown={event => { event.preventDefault(); applyCompletion(item); }}>
-                  <span className={`completion-kind kind-${item.kind}`}>{item.kind === 'function' ? 'ƒ' : item.kind === 'keyword' ? 'K' : item.kind === 'global' ? 'G' : 'S'}</span><strong>{item.label}</strong><em>{item.detail}</em>
-                </button>)}
-              </div>}
-            </div>
-
-            <section className="bottom-panel">
-              <div className="panel-header"><div className="panel-tabs">
-                {([['problems','Problems',problems.length],['output','Roblox Output',output.length],['terminal','Terminal',terminal.length]] as const).map(([id, label, count]) => <button key={id} className={`panel-tab ${panel === id ? 'is-active' : ''}`} onClick={() => setPanel(id)}><span>{label}</span>{count > 0 && <b>{count}</b>}</button>)}
-              </div><div className="panel-actions">
-                {panel === 'output' && <label className="panel-search"><Icon name="search" size={11} /><input value={outputQuery} onChange={event => setOutputQuery(event.target.value)} placeholder="Filter output" /></label>}
-                <button className="icon-button" onClick={() => panel === 'terminal' ? setTerminal([]) : panel === 'output' ? setOutput([]) : undefined} aria-label="Clear panel"><Icon name="x" size={11} /></button>
-              </div></div>
-              <div className="console" ref={consoleRef}>{currentRows.length === 0 ? <div className="console-empty">No {panel === 'output' ? 'Roblox output' : panel} entries.</div> : currentRows.map((row, index) => <div className={`console-row level-${row.level}`} key={`${row.timestamp || ''}-${index}`}><time>{row.timestamp?.slice(11,19) || '--:--:--'}</time><span>{row.message}</span></div>)}</div>
-            </section>
+          {view==='editor'&&<div className="editor-layout view-enter">
+            <div className="tabbar"><div className="tab-strip">{tabs.map(tab=><div className={`editor-tab ${tab.id===activeTabId?'is-active':''}`} key={tab.id}><button className="tab-main" onClick={()=>setActiveTabId(tab.id)}><span className="tab-dot"/><span>{tab.name}</span>{tab.dirty&&<i/>}</button><button className="tab-close" onClick={()=>closeTab(tab.id)}><Icon name="x" size={11}/></button></div>)}<button className="new-tab" onClick={()=>addTab()}><Icon name="plus" size={13}/></button></div></div>
+            <div className="commandbar"><div className="command-group"><button className={`command ${executeState==='checking'?'is-busy':''}`} onClick={()=>void executeReference()}><Icon name="play" size={12}/>{executeState==='checking'?'Checking…':executeState==='ready'?'Ready':'Execute'}</button><button className="command" onClick={clearEditor}>Clear</button><span className="divider"/><button className="command" onClick={()=>void openFile()}><Icon name="open" size={12}/>Open</button><button className="command" onClick={()=>void saveFile()}><Icon name="save" size={12}/>Save</button><button className="command" onClick={()=>{void navigator.clipboard?.writeText(activeTab?.content||'');showToast('Copied');}}><Icon name="copy" size={12}/>Copy</button></div><div className="command-group command-group-right"><div className="runtime-chip"><span className={runtime.online?'online':''}/>{runtime.online?'Local listener':'Detached'}</div><button className={`inject ${injectState==='injecting'?'is-injecting':''} ${injectState==='ready'?'is-ready':''}`} onClick={()=>void injectReference()}><span className="inject-sheen"/>{injectState==='injecting'?<span className="spinner"/>:<Icon name={injectState==='ready'?'check':'bolt'} size={12}/>}<b>{injectLabel}</b>{injectState==='injecting'&&<em>{injectProgress}%</em>}</button></div></div>
+            <div className="editor-surface"><pre className="line-gutter" ref={gutterRef}>{lineNumbers}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={activeTab?.content||''} onChange={event=>{updateActive(event.target.value);updateCompletions(event.target.value,event.target.selectionStart,event.target.scrollTop,event.target.scrollLeft);}} onClick={event=>updateCompletions(event.currentTarget.value,event.currentTarget.selectionStart,event.currentTarget.scrollTop,event.currentTarget.scrollLeft)} onKeyDown={editorKeyDown} onScroll={event=>{if(gutterRef.current)gutterRef.current.scrollTop=event.currentTarget.scrollTop;if(suggestions.length)updateCompletions(event.currentTarget.value,event.currentTarget.selectionStart,event.currentTarget.scrollTop,event.currentTarget.scrollLeft);}}/>{suggestions.length>0&&<div className="completion" style={{left:suggestPos.left,top:suggestPos.top}}>{suggestions.map((item,index)=><button key={item.label} className={index===suggestIndex?'is-active':''} onMouseDown={e=>{e.preventDefault();acceptSuggestion(item);}}><span className={`completion-kind kind-${item.kind}`}>{item.kind.slice(0,1).toUpperCase()}</span><strong>{item.label}</strong><small>{item.detail}</small></button>)}<footer>Tab / Enter to accept · Esc to close</footer></div>}</div>
+            <section className="bottom-panel"><div className="panel-head"><div className="panel-tabs">{([['problems','Problems',problems.length],['output','Roblox Output',output.length],['terminal','Terminal',terminal.length]] as const).map(([id,label,count])=><button key={id} className={panel===id?'is-active':''} onClick={()=>setPanel(id)}>{label}{count>0&&<b>{count}</b>}</button>)}</div><div className="panel-tools">{panel==='output'&&<><label className="panel-search"><Icon name="search" size={11}/><input value={outputQuery} onChange={e=>setOutputQuery(e.target.value)} placeholder="Filter output"/></label><button title={outputPaused?'Resume':'Pause'} onClick={()=>setOutputPaused(v=>!v)}><Icon name={outputPaused?'play':'pause'} size={11}/></button><button title="Copy" onClick={()=>void navigator.clipboard?.writeText(filteredOutput.map(r=>r.message).join('\n'))}><Icon name="copy" size={11}/></button><button title="Save" onClick={()=>void saveOutput()}><Icon name="download" size={11}/></button></>}{panel==='terminal'&&<button title="Clear terminal" onClick={()=>setTerminal([])}><Icon name="trash" size={11}/></button>}</div></div><div className="console">{currentRows.length===0?<div className="console-empty">No {panel} entries.</div>:currentRows.map((row,index)=><div className={`console-row level-${row.level}`} key={`${row.timestamp||''}-${index}`}>{timestamps&&<time>{row.timestamp?.slice(11,19)||'--:--:--'}</time>}<span>{row.message}</span></div>)}</div></section>
           </div>}
 
-          {view === 'scripts' && <div className="page view-enter">
-            <div className="page-header"><div><span className="eyebrow">SCRIPT LIBRARY</span><h1>Scripts</h1><p>Search ScriptBlox and open a result in the editor.</p></div><button className="secondary-button" onClick={() => void searchScripts(scriptPage)}><Icon name="refresh" size={12} />Refresh</button></div>
-            <div className="script-search"><Icon name="search" size={13} /><input value={scriptQuery} onChange={event => setScriptQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void searchScripts(1); }} placeholder="Search scripts" /><button onClick={() => void searchScripts(1)}>Search</button></div>
-            {scriptError && <div className="inline-error">{scriptError}</div>}
-            <div className="script-list">{scriptLoading ? <div className="list-empty">Loading scripts…</div> : scriptResults.length === 0 ? <div className="list-empty">Search to load scripts.</div> : scriptResults.map((item, index) => <div className="script-row" key={item.id || item.slug || index}><div className="script-row-main"><strong>{item.title || 'Untitled script'}</strong><span>{item.game || 'Unknown game'}</span></div><div className="script-meta"><span>{item.verified ? 'Verified' : 'Community'}</span><span>{Number(item.views || 0).toLocaleString()} views</span></div><button onClick={() => void openScriptItem(item)}>Open</button></div>)}</div>
-            <div className="pager"><button disabled={scriptPage <= 1} onClick={() => void searchScripts(scriptPage - 1)}>Previous</button><span>{scriptPage} / {scriptTotalPages}</span><button disabled={scriptPage >= scriptTotalPages} onClick={() => void searchScripts(scriptPage + 1)}>Next</button></div>
-          </div>}
+          {view==='scripts'&&<div className="page scripts-page view-enter"><div className="page-head"><div><span className="eyebrow">SCRIPTBLOX LIBRARY</span><h1>Script search</h1><p>Search the public ScriptBlox catalogue and open source directly in a local editor tab.</p></div><span className="powered">Powered by ScriptBlox.com</span></div><div className="search-box"><Icon name="search" size={14}/><input value={scriptQuery} onChange={e=>setScriptQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void searchScripts(1);}} placeholder="Search scripts, games, utilities…"/><button onClick={()=>void searchScripts(1)} disabled={scriptLoading}>{scriptLoading?'Searching…':'Search'}</button></div><div className="filters"><FilterToggle label="Verified" checked={filterVerified} onChange={setFilterVerified}/><FilterToggle label="Universal" checked={filterUniversal} onChange={setFilterUniversal}/><FilterToggle label="Keyless" checked={filterKeyless} onChange={setFilterKeyless}/><FilterToggle label="Unpatched" checked={filterUnpatched} onChange={setFilterUnpatched}/><button className="refresh-results" onClick={()=>void searchScripts(scriptPage)}><Icon name="refresh" size={11}/>Refresh</button></div>{scriptError&&<div className="inline-error"><strong>Search failed</strong><span>{scriptError}</span></div>}<div className="script-list">{scriptLoading?<div className="list-empty">Contacting ScriptBlox…</div>:scriptResults.length===0?<div className="list-empty">Search for a script or press Search with an empty query for recent results.</div>:scriptResults.map((item,index)=><article className="script-row" key={item.id||item.slug||index}><div className="script-main"><strong>{item.title||'Untitled script'}</strong><span>{item.game||'Universal / unknown game'}</span></div><div className="badges">{item.verified&&<span>Verified</span>}{item.isUniversal&&<span>Universal</span>}{item.key===false&&<span>Keyless</span>}{item.isPatched===false&&<span>Active</span>}</div><div className="views">{Number(item.views||0).toLocaleString()} views</div><button onClick={()=>void openScriptItem(item)}>Open</button></article>)}</div><div className="pager"><button disabled={scriptPage<=1} onClick={()=>void searchScripts(scriptPage-1)}>Previous</button><span>{scriptPage} / {scriptTotalPages}</span><button disabled={scriptPage>=scriptTotalPages} onClick={()=>void searchScripts(scriptPage+1)}>Next</button></div></div>}
 
-          {view === 'clients' && <div className="page view-enter">
-            <div className="page-header"><div><span className="eyebrow">ROBLOX DESKTOP</span><h1>Clients</h1><p>Launch, detect, refresh, or explicitly close a desktop client.</p></div><div className="page-actions"><button className="secondary-button" onClick={() => void launchRoblox()}><Icon name="rocket" size={12} />Launch Roblox</button><button className="secondary-button" onClick={() => void safeInvoke<ClientInfo[]>('list_clients', {}, []).then(setClients)}><Icon name="refresh" size={12} />Refresh</button></div></div>
-            <div className="client-list"><div className="list-head"><span>Process</span><span>PID</span><span>Memory</span><span /></div>{clients.length === 0 ? <div className="list-empty">No Roblox desktop client detected.</div> : clients.map(client => <div className="client-row" key={client.pid}><span className="process-name"><Icon name="monitor" size={13} />{client.name}</span><code>{client.pid}</code><span>{client.memory || '—'}</span><button onClick={() => void closeClient(client.pid)}>Close</button></div>)}</div>
-          </div>}
+          {view==='clients'&&<div className="page view-enter"><div className="page-head"><div><span className="eyebrow">LOCAL WINDOWS CLIENTS</span><h1>Roblox clients</h1><p>Launch, detect and explicitly close local Roblox desktop processes.</p></div><div className="head-actions"><button className="secondary" onClick={()=>void launchRoblox()}><Icon name="rocket" size={12}/>Launch Roblox</button><button className="secondary" onClick={()=>void invokeSafe<ClientInfo[]>('list_clients',{},[]).then(setClients)}><Icon name="refresh" size={12}/>Refresh</button></div></div><div className="client-table"><div className="client-head"><span>Process</span><span>PID</span><span>Memory</span><span>Status</span><span/></div>{clients.length===0?<div className="list-empty">No Roblox desktop client detected.</div>:clients.map(client=><div className="client-row" key={client.pid}><span className="process"><Icon name="monitor" size={13}/>{client.name}</span><code>{client.pid}</code><span>{client.memory||'—'}</span><span className="state"><i/>Running</span><button onClick={()=>void closeClient(client.pid)}>Close</button></div>)}</div><div className="diagnostic-strip"><div><span>Local listener</span><strong>{runtime.online?`Detected :${runtime.port}`:'Detached'}</strong></div><div><span>Execution bridge</span><strong>Sealed</strong></div><div><span>Reference pipeline</span><strong>Available</strong></div></div></div>}
 
-          {view === 'settings' && <div className="settings-page view-enter">
-            <aside className="settings-nav"><div><span className="eyebrow">SETTINGS</span><strong>Customize</strong></div>{([['appearance','palette','Appearance'],['editor','code','Editor'],['roblox','monitor','Roblox'],['workspace','sliders','Workspace'],['about','spark','About']] as const).map(([id, icon, label]) => <button key={id} className={settingsSection === id ? 'is-active' : ''} onClick={() => setSettingsSection(id)}><Icon name={icon} size={13} /><span>{label}</span></button>)}</aside>
-            <div className="settings-content">
-              {settingsSection === 'appearance' && <section className="settings-section"><div className="settings-heading"><span className="eyebrow">APPEARANCE</span><h2>Pure black. Your accent.</h2><p>The workspace stays black; only the interface accent changes.</p></div>
-                <div className="setting-row"><div><strong>Accent color</strong><span>Tabs, focus rings, activity indicators, and completion selection.</span></div><div className="accent-picker">{ACCENTS.map(color => <button key={color} className={accent.toLowerCase() === color ? 'is-active' : ''} style={{ background: color }} onClick={() => setAccent(color)} aria-label={`Accent ${color}`} />)}<label className="custom-color"><input type="color" value={accent} onChange={event => setAccent(event.target.value)} /><span>Custom</span></label></div></div>
-                <div className="setting-row"><div><strong>Density</strong><span>Compact is tuned for the smaller desktop window.</span></div><div className="segmented"><button className={density === 'compact' ? 'is-active' : ''} onClick={() => setDensity('compact')}>Compact</button><button className={density === 'comfortable' ? 'is-active' : ''} onClick={() => setDensity('comfortable')}>Comfort</button></div></div>
-                <div className="setting-row"><div><strong>Interface motion</strong><span>Subtle 150ms transitions and restrained micro-motion.</span></div><Toggle checked={motion} onChange={setMotion} label="Interface motion" /></div>
-              </section>}
-              {settingsSection === 'editor' && <section className="settings-section"><div className="settings-heading"><span className="eyebrow">EDITOR</span><h2>Luau editing.</h2><p>Lightweight editing features without replacing the native shell.</p></div>
-                <div className="setting-row"><div><strong>Luau autocomplete</strong><span>Type pr, task., tab, local and more to open completions beside the caret.</span></div><Toggle checked={autocomplete} onChange={setAutocomplete} label="Luau autocomplete" /></div>
-                <div className="setting-row"><div><strong>Editor font size</strong><span>Cascadia Code / Consolas fallback.</span></div><div className="font-stepper"><button onClick={() => setEditorFontSize(size => Math.max(10, size - 1))}>−</button><strong>{editorFontSize}px</strong><button onClick={() => setEditorFontSize(size => Math.min(16, size + 1))}>+</button></div></div>
-              </section>}
-              {settingsSection === 'roblox' && <section className="settings-section"><div className="settings-heading"><span className="eyebrow">ROBLOX</span><h2>Desktop controls.</h2><p>Launch and inspect local client presence. No process injection is wired here.</p></div>
-                <div className="setting-row"><div><strong>Launch Roblox</strong><span>Open the registered Roblox desktop protocol.</span></div><button className="setting-action" onClick={() => void launchRoblox()}><Icon name="rocket" size={12} />Launch</button></div>
-                <div className="setting-row"><div><strong>Local listener</strong><span>Reachability check on localhost:{runtime.port}.</span></div><span className="value-chip"><span className={`runtime-dot ${runtime.online ? 'is-online' : ''}`} />{runtime.online ? 'Detected' : 'Detached'}</span></div>
-                <div className="setting-row"><div><strong>Detected clients</strong><span>Current RobloxPlayerBeta.exe process count.</span></div><span className="value-chip">{clients.length}</span></div>
-              </section>}
-              {settingsSection === 'workspace' && <section className="settings-section"><div className="settings-heading"><span className="eyebrow">WORKSPACE</span><h2>Persistence & output.</h2><p>Keep the editor compact while retaining useful desktop controls.</p></div>
-                <div className="setting-row"><div><strong>Auto-Execute folder</strong><span className="path-text">{autoFolder || 'No folder selected'}</span></div><button className="setting-action" onClick={() => void chooseAutoFolder()}><Icon name="folder" size={12} />Choose</button></div>
-                <div className="setting-row"><div><strong>Output auto-scroll</strong><span>Keep Roblox Output pinned to the newest visible entry.</span></div><Toggle checked={outputAutoScroll} onChange={setOutputAutoScroll} label="Output auto-scroll" /></div>
-              </section>}
-              {settingsSection === 'about' && <section className="settings-section"><div className="settings-heading"><span className="eyebrow">ABOUT</span><h2>osirhidden desktop.</h2><p>Tauri + React + strict TypeScript.</p></div><div className="about-grid"><div><span>Version</span><strong>{appInfo.version}</strong></div><div><span>Platform</span><strong>{appInfo.platform}</strong></div><div><span>Architecture</span><strong>{appInfo.arch}</strong></div><div><span>Renderer</span><strong>React / TSX</strong></div></div></section>}
-            </div>
-          </div>}
+          {view==='settings'&&<div className="settings-page view-enter"><aside className="settings-nav"><span className="eyebrow">SETTINGS</span>{['Appearance','Editor','Motion','Output','Workspace','About'].map((x,i)=><a key={x} href={`#s${i}`}>{x}</a>)}</aside><div className="settings-content">
+            <SettingsSection id="s0" title="Appearance" description="Pure-black surfaces with an optional interaction accent."><SettingRow title="Accent" description="Default is neutral white. No blue is used anywhere in the base theme."><div className="accent-palette">{(Object.keys(ACCENTS) as Accent[]).map(a=><button key={a} className={accent===a?'is-active':''} style={{'--swatch':ACCENTS[a]} as React.CSSProperties} onClick={()=>setAccent(a)} title={a}><span/></button>)}</div></SettingRow><SettingRow title="Density" description="Keep the geometry fixed while tightening control spacing."><Segmented value={density} values={[['comfortable','Comfort'],['compact','Compact']]} onChange={v=>setDensity(v as Density)}/></SettingRow></SettingsSection>
+            <SettingsSection id="s1" title="Editor" description="Luau authoring and completion behavior."><SettingRow title="Autocomplete" description="Prefix completion for Luau keywords, globals and standard functions."><Toggle checked={autocomplete} onChange={setAutocomplete}/></SettingRow><SettingRow title="Font size" description="Cascadia Code / Consolas editor size."><Range value={editorFontSize} min={10} max={17} suffix="px" onChange={setEditorFontSize}/></SettingRow></SettingsSection>
+            <SettingsSection id="s2" title="Motion" description="Short, consistent desktop transitions."><SettingRow title="Interface motion" description="Navigation, tabs, completion menus and status animations."><Toggle checked={motion} onChange={setMotion}/></SettingRow></SettingsSection>
+            <SettingsSection id="s3" title="Output" description="Roblox log presentation and panel sizing."><SettingRow title="Timestamps" description="Show parsed log timestamps."><Toggle checked={timestamps} onChange={setTimestamps}/></SettingRow><SettingRow title="Maximum rows" description="Bound log history to keep rendering stable."><Range value={maxOutput} min={80} max={500} step={20} onChange={setMaxOutput}/></SettingRow><SettingRow title="Panel height" description="Adjust the editor console region."><Range value={panelHeight} min={120} max={260} step={10} suffix="px" onChange={setPanelHeight}/></SettingRow></SettingsSection>
+            <SettingsSection id="s4" title="Workspace" description="Local folders and application integration."><SettingRow title="Scripts folder" description={scriptFolder||'Not selected'}><button className="secondary" onClick={()=>void chooseFolder(false)}>Choose</button></SettingRow><SettingRow title="Auto-Execute folder" description={autoFolder||'Not selected'}><button className="secondary" onClick={()=>void chooseFolder(true)}>Choose</button></SettingRow><SettingRow title="Launch Roblox" description="Uses the registered roblox-player protocol on Windows."><button className="secondary" onClick={()=>void launchRoblox()}><Icon name="rocket" size={12}/>Launch</button></SettingRow></SettingsSection>
+            <SettingsSection id="s5" title="About" description="Native application and sealed reference-runtime information."><div className="about-grid"><div><span>Version</span><strong>{appInfo.version}</strong></div><div><span>Platform</span><strong>{appInfo.platform}</strong></div><div><span>Architecture</span><strong>{appInfo.arch}</strong></div><div><span>Target wiring</span><strong>Disabled</strong></div></div></SettingsSection>
+          </div></div>}
         </section>
       </main>
-
-      <footer className="statusbar"><div><span className={`status-dot ${runtime.online ? 'is-online' : ''}`} /><span>{runtime.online ? `Local listener :${runtime.port}` : 'Local runtime detached'}</span></div><div><span>Luau autocomplete {autocomplete ? 'on' : 'off'}</span><span className="status-separator">·</span><span>{clients.length} client{clients.length === 1 ? '' : 's'}</span><span className="status-separator">·</span><span>{appInfo.arch}</span></div></footer>
-      {toast && <div className="toast" role="status">{toast}</div>}
+      <footer className="statusbar"><div><span className={`status-dot ${runtime.online?'online':''}`}/><span>{runtime.online?`Listener :${runtime.port}`:'Runtime detached'}</span><span className="status-sep">·</span><span>target boundary sealed</span></div><div><span>Luau</span><span className="status-sep">·</span><span>{activeTab?.content.split('\n').length||1} lines</span><span className="status-sep">·</span><span>{clients.length} client{clients.length===1?'':'s'}</span><span className="status-sep">·</span><span>{appInfo.arch}</span></div></footer>
+      {toast&&<div className="toast">{toast}</div>}
     </div>
   </div>;
 }
+
+function ExplorerSection({title,files,path,onChoose,onOpen}:{title:string;files:FolderScript[];path:string;onChoose:()=>void;onOpen:(path:string)=>void}){const [open,setOpen]=useState(true);return <section className="tree-section"><div className="tree-heading"><button className={open?'open':''} onClick={()=>setOpen(v=>!v)}><Icon name="chevron" size={12}/><Icon name="folder" size={13}/><strong>{title}</strong></button><button className="tree-add" onClick={onChoose} title={`Choose ${title} folder`}><Icon name="plus" size={12}/></button></div><div className={`tree-content ${open?'is-open':''}`}><div>{path&&<div className="folder-path" title={path}>{path}</div>}{!path?<button className="empty-folder" onClick={onChoose}>Choose folder</button>:files.length===0?<div className="empty-folder static">No .lua or .luau files</div>:files.map(file=><button className="tree-file" key={file.path} onClick={()=>onOpen(file.path)}><Icon name="file" size={12}/><span>{file.name}</span></button>)}</div></div></section>}
+function FilterToggle({label,checked,onChange}:{label:string;checked:boolean;onChange:(v:boolean)=>void}){return <button className={`filter ${checked?'is-active':''}`} onClick={()=>onChange(!checked)}><span/>{label}</button>}
+function Toggle({checked,onChange}:{checked:boolean;onChange:(v:boolean)=>void}){return <button className={`toggle ${checked?'is-on':''}`} onClick={()=>onChange(!checked)} aria-pressed={checked}><span/></button>}
+function Segmented({value,values,onChange}:{value:string;values:[string,string][];onChange:(v:string)=>void}){return <div className="segmented">{values.map(([v,l])=><button key={v} className={value===v?'is-active':''} onClick={()=>onChange(v)}>{l}</button>)}</div>}
+function Range({value,min,max,step=1,suffix='',onChange}:{value:number;min:number;max:number;step?:number;suffix?:string;onChange:(v:number)=>void}){return <div className="range"><input type="range" value={value} min={min} max={max} step={step} onChange={e=>onChange(Number(e.target.value))}/><output>{value}{suffix}</output></div>}
+function SettingsSection({id,title,description,children}:{id:string;title:string;description:string;children:React.ReactNode}){return <section id={id} className="settings-section"><header><h2>{title}</h2><p>{description}</p></header>{children}</section>}
+function SettingRow({title,description,children}:{title:string;description:string;children:React.ReactNode}){return <div className="setting-row"><div><strong>{title}</strong><span>{description}</span></div><div>{children}</div></div>}
