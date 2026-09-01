@@ -30,15 +30,20 @@ jobs:
         shell: pwsh
         run: python scripts/verify_boundary.py
 
-      - name: Patch renderer syntax
+      - name: Patch renderer syntax and verify
         shell: pwsh
         run: |
           $p = 'src/App.jsx'
           $s = Get-Content $p -Raw
-          $old = 'this.renderPanel())); }'
-          $new = 'this.renderPanel()))); }'
-          if (-not $s.Contains($old)) { throw 'Expected renderer patch target was not found.' }
-          Set-Content -Path $p -Value ($s.Replace($old, $new)) -NoNewline
+          $patches = @(
+            @('this.renderPanel())); }', 'this.renderPanel()))); }'),
+            @('control)))); }', 'control))))); }')
+          )
+          foreach ($patch in $patches) {
+            if (-not $s.Contains($patch[0])) { throw "Expected renderer patch target not found: $($patch[0])" }
+            $s = $s.Replace($patch[0], $patch[1])
+          }
+          Set-Content -Path $p -Value $s -NoNewline -Encoding utf8
           Copy-Item $p "$env:TEMP\App.mjs"
           node --check "$env:TEMP\App.mjs"
 
