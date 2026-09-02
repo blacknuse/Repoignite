@@ -61,7 +61,31 @@ jobs:
           Get-Item $exe | Format-List FullName,Length,LastWriteTime
           Get-FileHash $exe -Algorithm SHA256
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload full source
+        uses: actions/upload-artifact@v4
+        with:
+          name: osirhidden-tauri-v2.3.1-full-reference-source
+          path: |
+            package.json
+            tsconfig.json
+            vite.config.ts
+            index.html
+            README.md
+            SECURITY_BOUNDARY.md
+            src/**
+            src-tauri/Cargo.toml
+            src-tauri/build.rs
+            src-tauri/tauri.conf.json
+            src-tauri/capabilities/**
+            src-tauri/src/**
+            src-tauri/icons/icon.ico
+            scripts/**
+            .github/workflows/osirhidden-tauri-build.yml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
         with:
           name: osirhidden-tauri-v2.3.1-full-reference-tsx-windows-x64
           path: src-tauri/target/release/osirhidden.exe
