@@ -129,18 +129,24 @@ pub fn inject_plan()->Value{
     let bundle_hash=fnv_text("DormantUpgrade-v1.8.9-safe-reference-91-files-2674-lines");let image=SyntheticImage::build();let image_ok=image.validate().is_ok();let seed=fnv_text(&format!("full-reference:{}:{}",bundle_hash,image.size_of_image));let mut space=VirtualAddressSpace::default();
     let region_specs=[(0x4000_0000,0x1000,false),(0x4000_1000,0x2000,false),(0x4000_3000,0x1800,false),(0x5000_0000,0x1000,true),(0x5000_1000,0x1000,true),(0x6000_0000,0x1000,false),(0x6000_1000,0x1000,false),(0x7000_0000,0x2000,true)];
     for (base,size,writable) in region_specs{space.reserve(base,size,writable).expect("fixed local virtual layout must be valid");}
-    let mut relocs=Vec::new();for i in 0..24u64{let address=0x5000_0000+i*8;let value=0x1400_1000+i*0x20;space.write(address,&value.to_le_bytes()).unwrap();relocs.push(Reloc{address,original:value});}
-    let snapshot=space.snapshot();let reloc_count=apply_relocations(&mut space,&relocs,0x200000).unwrap_or(0);let relocation_probe=space.read_u64(0x5000_0000).unwrap_or(0);let (import_count,import_digest)=resolve_imports().unwrap();let tls=[0x1100,0x1180,0x1200];let tls_ok=validate_tls(&tls).is_ok();let unwind=[(0x1000,0x1080),(0x1080,0x1180),(0x1180,0x1280),(0x1280,0x1380),(0x1380,0x1480),(0x1480,0x1580),(0x1580,0x1680),(0x1680,0x1780),(0x1780,0x1880),(0x1880,0x1980),(0x1980,0x1a80),(0x1a80,0x1b80)];let unwind_ok=validate_unwind(&unwind).is_ok();let order=topo_order().unwrap();let hs=handshake().unwrap();let replay=failure_replay(&mut space,u64::from_str_radix(&seed[..16],16).unwrap_or(1),16).unwrap_or(0);space.restore(&snapshot);
+    let mut relocs: Vec<Reloc> = Vec::new();
+    for i in 0..24u64 {
+        let address: u64 = 0x5000_0000u64 + i * 8u64;
+        let value: u64 = 0x1400_1000u64 + i * 0x20u64;
+        space.write(address, 'value.to_le_bytes()).unwrap();
+        relocs.push(Reloc { address, original: value });
+    }
+    let snapshot=space.snapshot();let reloc_count=apply_relocations(&mut space,&relocs,0x20000).unwrap_or(0);let relocation_probe=space.read_u64(0x5000_0000).unwrap_or(0);let (import_count,import_digest)=resolve_imports().unwrap();let tls=[0x1100,0x1180,0x1200];let tls_ok=validate_tls(&tls).is_ok();let unwind=[(0x1000,0x1080),(0x1080,0x1180),(0x1180,0x1280),(0x1280,0x1380),(0x1380,0x1480),(0x1480,0x1580),(0x1580,0x1680),(0x1680,0x1780),(0x1780,0x1880),(0x1880,0x1980),(0x1980,0x1a80),(0x1a80,0x1b80)];let unwind_ok=validate_unwind(&unwind).is_ok();let order=topo_order().unwrap();let hs=handshake().unwrap();let replay=failure_replay(&mut space,u64::from_str_radix(&seed[..16],16).unwrap_or(1),16).unwrap_or(0);space.restore(&snapshot);
     let compat_score=[image_ok,tls_ok,unwind_ok,reloc_count==24,import_count>=9,hs==vec!["HELLO","ACK","READY"],replay==16,order.len()==13].iter().filter(|x|**x).count()*100/8;
     let stages=vec![
-        stage("Boundary contract","local-only model asserted · target handles 0 · external effects 0".into(),&seed,55),
-        stage("Synthetic image",format!("machine 0x{:04x} · {} sections · entry RVA 0x{:x} · image validation={image_ok}",image.machine,image.sections.len(),image.entry_rva),&seed,65),
+        stage("Boundary contract","local-only model asserted ÷ target handles 0 · external effects 0".into(),&seed,55),
+        stage("Synthetic image",format!("machine 0x{:04x} · {} sections · entry RVA 0x{x} · image validation={image_ok}",image.machine,image.sections.len(),image.entry_rva),&seed,65),
         stage("Virtual address map",format!("{} isolated regions · collision, bounds and write-permission checks",space.region_count()),&seed,70),
         stage("Relocation model",format!("{reloc_count} local scalar records · probe 0x{relocation_probe:x} · no external writes"),&seed,70),
         stage("Import resolver",format!("{import_count} synthetic symbols · digest {}",&import_digest[..10]),&seed,65),
         stage("TLS model",format!("{} callbacks · deterministic order validation={tls_ok}",tls.len()),&seed,55),
         stage("Unwind model",format!("{} ranges · bounds/overlap validation={unwind_ok}",unwind.len()),&seed,60),
-        stage("Thread descriptor","entry/stack/argument descriptor modeled locally » OS thread creation absent".into(),&seed,55),
+        stage("Thread descriptor","entry/stack/argument descriptor modeled locally · OS thread creation absent".into(),&seed,55),
         stage("Dependency graph",format!("{} nodes · topological order {}",order.len(),order.join(" → ")),&seed,60),
         stage("Handshake",format!("{} over in-memory channel",hs.join(" → ")),&seed,55),
         stage("Transaction journal","snapshot, mutation, reverse restore and invariant checks active".into(),&seed,65),
@@ -152,4 +158,4 @@ pub fn inject_plan()->Value{
     json!({"ok":true,"mode":"reference-only","session":seed,"stages":stages,"virtualRegions":space.region_count(),"relocationRecords":reloc_count,"importDescriptors":import_count,"tlsCallbacks":tls.len(),"unwindRecords":unwind.len(),"rollbackEntries":snapshot.len(),"dependencyNodes":order.len(),"failureCases":16,"replayPasses":replay,"handshake":hs,"compatibilityScore":compat_score,"referenceCoverageHash":bundle_hash,"referenceSourceFiles":91,"referenceCppLines":2674,"externalEffects":0,"targetWiring":false})
 }
 
-pub fn bundle_manifest()->Value{ json!({"name":"DormantUpgrade v1.8.9 safe reference coverage","hash":fnv_text("DormantUpgrade-v1.8.9-safe-reference-91-files-2674-lines"),"files":91,"cppLines":2674,"compiledIntoTarget":false,"externalEffects":0,"targetWiring":false})}
+pub fn bundle_manifest()->Value{json!({"name":"DormantUpgrade v1.8.9 safe reference coverage","hash":fnv_text("DormantUpgrade-v1.8.9-safe-reference-91-files-2674-lines"),"files":91,"cppLines":2674,"compiledIntoTarget":false,"externalEffects":0,"targetWiring":false})}
