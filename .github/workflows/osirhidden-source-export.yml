@@ -22,9 +22,9 @@ jobs:
           [ -f package-lock.json ] && cp package-lock.json export/osirhidden-Tauri-React-TSX-Source/ || true
           [ -f Cargo.lock ] && cp Cargo.lock export/osirhidden-Tauri-React-TSX-Source/ || true
           cp .github/workflows/osirhidden-tauri-build.yml export/osirhidden-Tauri-React-TSX-Source/BUILD_WORKFLOW.yml
-          printf '%s\n' 'Current source snapshot from osirhidden-tauri-build.' > export/osirhidden-Tauri-React-TSX-Source/SOURCE_SNAPSHOT.txt
+          printf '%s\n' 'Current v2.3.1 source snapshot. Execute/inject reference planning logic is present; external Roblox/process target wiring remains sealed.' > export/osirhidden-Tauri-React-TSX-Source/SOURCE_SNAPSHOT.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: osirhidden-tauri-react-tsx-source
+          name: osirhidden-tauri-react-tsx-source-v2.3.1
           path: export/osirhidden-Tauri-React-TSX-Source
           if-no-files-found: error
