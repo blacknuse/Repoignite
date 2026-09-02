@@ -1,0 +1,30 @@
+name: osirhidden source export
+on:
+  push:
+    branches: [osirhidden-tauri-build]
+    paths:
+      - '.github/workflows/osirhidden-source-export.yml'
+  workflow_dispatch:
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare source package
+        shell: bash
+        run: |
+          set -e
+          mkdir -p export/osirhidden-Tauri-React-TSX-Source
+          cp -r src src-tauri scripts export/osirhidden-Tauri-React-TSX-Source/
+          cp package.json tsconfig.json index.html export/osirhidden-Tauri-React-TSX-Source/
+          [ -f vite.config.ts ] && cp vite.config.ts export/osirhidden-Tauri-React-TSX-Source/ || true
+          [ -f vite.config.js ] && cp vite.config.js export/osirhidden-Tauri-React-TSX-Source/ || true
+          [ -f package-lock.json ] && cp package-lock.json export/osirhidden-Tauri-React-TSX-Source/ || true
+          [ -f Cargo.lock ] && cp Cargo.lock export/osirhidden-Tauri-React-TSX-Source/ || true
+          cp .github/workflows/osirhidden-tauri-build.yml export/osirhidden-Tauri-React-TSX-Source/BUILD_WORKFLOW.yml
+          printf '%s\n' 'Current source snapshot from osirhidden-tauri-build.' > export/osirhidden-Tauri-React-TSX-Source/SOURCE_SNAPSHOT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osirhidden-tauri-react-tsx-source
+          path: export/osirhidden-Tauri-React-TSX-Source
+          if-no-files-found: error
