@@ -1,6 +1,6 @@
 [package]
 name = "osirhidden"
-version = "2.3.0"
+version = "2.3.1"
 description = "osirhidden premium Tauri desktop workspace"
 authors = ["osirhidden"]
 edition = "2021"

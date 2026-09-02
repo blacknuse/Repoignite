@@ -63,7 +63,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: osirhidden-tauri-v2.3.0-black-edition-tsx-windows-x64
+          name: osirhidden-tauri-v2.3.1-full-reference-tsx-windows-x64
           path: src-tauri/target/release/osirhidden.exe
           if-no-files-found: error
           retention-days: 7

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod full_reference;
+
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -14,7 +16,7 @@ use tauri::{LogicalSize, Size, WebviewWindow};
 
 #[derive(Serialize)]
 struct AppInfo { version: String, platform: String, arch: String }
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct RuntimeStatus { online: bool, port: u16, mode: &'static str }
 #[derive(Serialize, Clone)]
 struct ClientInfo { name: String, pid: u32, memory: String }
@@ -41,7 +43,7 @@ fn allowed_script_extension(path: &Path) -> bool {
 }
 fn read_script_file(path: &Path) -> Result<OpenedScript, String> {
     if !path.is_file() || !allowed_script_extension(path) { return Err("UNSUPPORTED_SCRIPT_FILE".into()); }
-    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    let metadata = fs:metadata(path).map_err(|e| e.to_string())?;
     if metadata.len() > 2 * 1024 * 1024 { return Err("SCRIPT_TOO_LARGE".into()); }
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut content = String::new();
@@ -163,10 +165,11 @@ fn save_script(suggested_name: String, content: String) -> Result<Option<SavedSc
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(Some(SavedScript { ok:true, name:path.file_name().and_then(|x|x.to_str()).unwrap_or("script.luau").to_string(), path:path.to_string_lossy().to_string() }))
 }
+
 #[tauri::command]
 fn save_text_file(suggested_name: String, content: String) -> Result<Option<Value>, String> {
     if content.len() > 4 * 1024 * 1024 { return Err("TEXT_TOO_LARGE".into()); }
-    let picked = rfd::FileDialog::new().set_file_name(&suggested_name).add_filter("Text", &["txt","log"]).save_file();
+    let picked = rfd::FileDialog::new().set_file_name(&if suggested_name.trim().is_empty(){"output.txt"}else{&suggested_name}).add_filter("Text", &["txt","log"]).save_file();
     let Some(path) = picked else { return Ok(None); };
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(Some(json!({"ok":true,"path":path.to_string_lossy()})))
@@ -178,7 +181,7 @@ fn list_folder_scripts(path: String) -> Result<Vec<FolderScript>, String> {
     let root = PathBuf::from(path);
     if !root.is_dir() { return Err("FOLDER_NOT_FOUND".into()); }
     let mut out = Vec::new();
-    for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten().take(300) {
+    for entry in fs:read_dir(&root).map_err(|e| e.to_string())?.flatten().take(300) {
         let path = entry.path();
         if !path.is_file() || !allowed_script_extension(&path) { continue; }
         out.push(FolderScript { name:path.file_name().and_then(|x|x.to_str()).unwrap_or("script.luau").to_string(), path:path.to_string_lossy().to_string() });
@@ -195,9 +198,9 @@ fn newest_log() -> Option<PathBuf> {
         let Ok(entries) = fs::read_dir(dir) else { continue; };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|x|x.to_str()).map(|x|x.eq_ignore_ascii_case("log")) != Some(true) { continue; }
-            let Ok(modified) = entry.metadata().and_then(|m|m.modified()) else { continue; };
-            if best.as_ref().map(|b|modified>b.0).unwrap_or(true) { best=Some((modified,path)); }
+            if path.extension().and_then(|x|x.to_str()).map(|x|x.eq_ignore_ascii_case("log"))!=Some(true) { continue; }
+            let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else { continue; };
+            if best.as_ref().map(|bf modified>b.0).unwrap_or(true) { best=Some((modified,path)); }
         }
     }
     best.map(|x|x.1)
@@ -247,7 +250,7 @@ async fn scriptblox_search(query:String,page:Option<u32>,verified:Option<bool>,u
     let trimmed=query.trim();
     let endpoint=if trimmed.is_empty(){"https://scriptblox.com/api/script/fetch"}else{"https://scriptblox.com/api/script/search"};
     let client=reqwest::Client::builder().timeout(Duration::from_secs(12)).user_agent("osirhidden-desktop/2.2").build().map_err(|e|e.to_string())?;
-    let mut params=vec![("page",page.to_string()),("max","18".into()),("sortBy",if trimmed.is_empty(){"updatedAt".into()}else{"accuracy".into()}),("order","desc".into())];
+    let mut params=vec![("page",page.to_string()),("max","18".into()),("sortBy",if trimmed.is_empty(){"ipdatedAt".into()}else{"accuracy".into()}),("order","desc".into())];
     if !trimmed.is_empty() { params.push(("q",trimmed.chars().take(140).collect())); params.push(("strict","false".into())); }
     if verified==Some(true){params.push(("verified","1".into()));}
     if universal==Some(true){params.push(("universal","1".into()));}
@@ -256,7 +259,7 @@ async fn scriptblox_search(query:String,page:Option<u32>,verified:Option<bool>,u
     let response=client.get(endpoint).query(&params).header("Accept","application/json").send().await.map_err(|e|format!("NETWORK: {e}"))?;
     let status=response.status();
     let text=response.text().await.map_err(|e|format!("READ: {e}"))?;
-    if !status.is_success(){return Err(format!("HTTP {}: {}",status.as_u16(),text.chars().take(220).collect::<String>()));}
+    if !status.is_success(){return Err(format!("HTTP {}: {}", status.as_u16(),text.chars().take(220).collect::<String>()));}
     let payload:Value=serde_json::from_str(&text).map_err(|e|format!("JSON: {e}"))?;
     let Some(result)=payload.get("result") else { return Err(payload.get("message").and_then(Value::as_str).unwrap_or("SCRIPTBLOX_RESULT_MISSING").to_string()); };
     let scripts=result.get("scripts").and_then(Value::as_array).cloned().unwrap_or_default().iter().take(18).map(normalize_script).collect::<Vec<_>>();
@@ -297,40 +300,17 @@ fn structural_warnings(script:&str)->Vec<String>{
     warnings
 }
 #[tauri::command]
-fn reference_execute_plan(script:String)->Value{
-    let warnings=structural_warnings(&script);let ok=!script.trim().is_empty()&&warnings.iter().all(|w|!w.contains("NUL")&&!w.contains("unterminated")&&!w.contains("balance")&&!w.contains("Closing"));
-    let line_count=script.lines().count().max(1);let token_count=script.split_whitespace().count();let byte_count=script.len();
-    let stages=vec![
-        json!({"name":"Source preflight","detail":"Validate size, text shape and delimiters","durationMs":130}),
-        json!({"name":"Luau model","detail":"Build a local token and structure summary","durationMs":145}),
-        json!({"name":"Request frame","detail":"Model length-prefix and payload boundaries in memory","durationMs":120}),
-        json!({"name":"Scheduler plan","detail":"Create a deterministic local queue descriptor","durationMs":135}),
-        json!({"name":"Rollback guard","detail":"Record an in-memory checkpoint before completion","durationMs":105}),
-        json!({"name":"Ready","detail":"Reference plan completed without external dispatch","durationMs":90}),
-    ];
-    json!({"ok":ok,"mode":"reference-only","stages":stages,"warnings":warnings,"digest":fnv1a64(&script),"lineCount":line_count,"tokenCount":token_count,"byteCount":byte_count,"externalEffects":0,"targetWiring":false})
-}
+fn reference_execute_plan(script:String)->Value{ full_reference::execute_plan(script) }
 #[tauri::command]
-fn reference_inject_plan()->Value{
-    let stages=vec![
-        json!({"name":"Preflight","detail":"Validate sealed reference boundary","durationMs":125}),
-        json!({"name":"Image model","detail":"Parse synthetic PE metadata only","durationMs":150}),
-        json!({"name":"Address plan","detail":"Plan virtual address ranges in local model memory","durationMs":160}),
-        json!({"name":"Relocation plan","detail":"Evaluate scalar relocation records without writes","durationMs":145}),
-        json!({"name":"Import plan","detail":"Resolve synthetic symbol descriptors","durationMs":150}),
-        json!({"name":"TLS / unwind plan","detail":"Validate callback and exception metadata order","durationMs":145}),
-        json!({"name":"Handshake model","detail":"Run hello / ack / ready state machine locally","durationMs":155}),
-        json!({"name":"Rollback guard","detail":"Verify deterministic reverse journal","durationMs":125}),
-        json!({"name":"Ready","detail":"Reference pipeline complete; external boundary remains sealed","durationMs":95}),
-    ];
-    json!({"ok":true,"mode":"reference-only","stages":stages,"warnings":[],"externalEffects":0,"targetWiring":false})
-}
+fn reference_inject_plan()->Value{ full_reference::inject_plan() }
+#[tauri::command]
+fn reference_bundle_manifest()->Value{ full_reference::bundle_manifest() }
 
 fn main(){
     tauri::Builder::default().invoke_handler(tauri::generate_handler![
         app_info,promote_main_window,window_start_dragging,window_minimize,window_toggle_maximize,window_close,
         runtime_status,launch_roblox,list_clients,close_client,load_settings,save_settings,
         open_script,read_script_path,save_script,save_text_file,choose_script_folder,list_folder_scripts,
-        read_roblox_output,scriptblox_search,scriptblox_raw,reference_execute_plan,reference_inject_plan
+        read_roblox_output,scriptblox_search,scriptblox_raw,reference_execute_plan,reference_inject_plan,reference_bundle_manifest
     ]).run(tauri::generate_context!()).expect("error while running osirhidden");
 }
