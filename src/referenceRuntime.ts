@@ -204,12 +204,12 @@ export function buildInjectReference():InjectReferenceResult{
     stage('imports','Import graph',`${importDescriptors} synthetic descriptors · name/ordinal branches · cycle guard`,seed),
     stage('tls','TLS ordering',`${tlsCallbacks} modeled callbacks · deterministic order only`,seed),
     stage('unwind','Exception metadata',`${unwindRecords} modeled unwind records · range and overlap validation`,seed),
-    stage('thread','Thread descriptor','Modeled entry/stack/argument contract only; no OS thread creation`,seed),
+    stage('thread','Thread descriptor','Modeled entry/stack/argument contract only; no OS thread creation',seed),
     stage('deps','Dependency DAG',`${dependencyNodes} nodes · topological order verified`,seed),
-    stage('handshake','In-memory handshake','HELLO → ACK → READY state machine over local virtual channel`,seed),
+    stage('handshake','In-memory handshake','HELLO → ACK → READY state machine over local virtual channel',seed),
     stage('journal','Reverse journal',`${rollbackEntries} local entries · reverse-order rollback verified`,seed),
     stage('failure','Failure matrix',`${replayPasses}/${failureCases} deterministic failure/recovery cases passed`,seed),
-    stage('seal','Integrity seal','Stage digests, dependency order, rollback and replay invariants sealed`,seed),
+    stage('seal','Integrity seal','Stage digests, dependency order, rollback and replay invariants sealed',seed),
   ];
   return {ok:true,mode:'reference-only',session:seed,stages,virtualRegions,relocationRecords,importDescriptors,tlsCallbacks,unwindRecords,rollbackEntries,dependencyNodes,failureCases,replayPasses,handshake:['HELLO','ACK','READY'],externalEffects:0,targetWiring:false};
 }
